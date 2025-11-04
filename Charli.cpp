@@ -51,12 +51,12 @@ public:
     #endif
         return data;
     }
-    static int run_system(const string& cmd){
+    static int run_system(const string& cmd) {
         int rc = system(cmd.c_str());
-        if(rc != 0) cerr << "[ERROR] Command failed: " << cmd << " (rc=" << rc << ")\n";
+        if(rc != 0) cerr << "[ERROR]: Command failed: " << cmd << " (rc=" << rc << ")\n";
         return rc;
     }
-    static int getInt(const string& prompt){
+    static int getInt(const string& prompt) {
         cout << prompt;
         string s; getline(cin, s);
         try{ return stoi(s); }catch(...){ return 0; }
@@ -68,7 +68,7 @@ public:
     }
     /* If you want to modify this program ^^ these functions are a godsend ^^"
      -------- SafeCalc -------- */
-    struct Parser{
+    struct Parser {
         string s; size_t i{0};
         void ws(){ while(i<s.size() && isspace((unsigned char)s[i])) ++i; }
         bool match(char c){ ws(); if(i<s.size() && s[i]==c){ ++i; return true;} return false; }
@@ -80,20 +80,22 @@ public:
             if(j==i) throw runtime_error("expected number");
             return stod(s.substr(j,i-j));
         }
-        double expr(){ return addsub(); }
-        double factor(){
+        double expr() { 
+            return addsub(); 
+        }
+        double factor()  {
             ws();
             if(match('+')) return factor();
             if(match('-')) return -factor();
             if(match('(')){ double v=expr(); if(!match(')')) throw runtime_error("missing ')'"); return v; }
             return number();
         }
-        double power(){
+        double power() {
             double v=factor(); ws();
             while(match('^')){ double r=factor(); v = pow(v,r); ws(); }
             return v;
         }
-        double term(){
+        double term() {
             double v=power(); ws();
             while(true){
                 if(match('*')) v*=power();
@@ -103,7 +105,7 @@ public:
                 ws();
             }
         }
-        double addsub(){
+        double addsub() {
             double v=term(); ws();
             while(true){
                 if(match('+')) v+=term();
@@ -114,26 +116,25 @@ public:
             }
         }
     };
-    static bool safe_eval(const string& e, double& out){
+    static bool safe_eval(const string& e, double& out) {
         try{
             Parser p{e,0};
             out = p.expr();
             p.ws();
             if(p.i != p.s.size()) throw runtime_error("trailing characters");
             return true;
-        }catch(const exception& ex){
+        } catch(const exception& ex){
             cerr << "Error: " << ex.what() << "\n";
             return false;
         }
     }
-
     // -------- Features --------
-    static void mdir(){
+    static void mdir() {
         string d = getStr("Directory name please: ");
     #if __has_include(<filesystem>)
         error_code ec;
         fs::create_directories(d, ec);
-        if(ec) cerr << "[ERROR] mkdir: " << ec.message() << "\n";
+        if(ec) cerr << "[ERROR]: mkdir: " << ec.message() << "\n";
     #else
       #if OS_WIN
         run_system(string("mkdir \"")+d+"\"");
@@ -143,25 +144,25 @@ public:
     #endif
         char cwd[1024]; if(getcwd(cwd,sizeof(cwd))) cout << "OK, have made a directory called: '"<<d<<"'\nPATH: "<<cwd<<"\n";
     }
-    static string read_file_contents(const string& filename){
+    static string read_file_contents(const string& filename) {
         ifstream file(filename);
         if (!file.is_open()) {
-            cerr << "Error opening file!" << endl;
+            cerr << "[!]Error opening file[!]" << endl;
             return "";
         }
         stringstream buffer;
         buffer << file.rdbuf();
         return buffer.str();
     }
-    static void write_to_file(const string& filename, const string& data){
+    static void write_to_file(const string& filename, const string& data) {
         ofstream file(filename);
         if (!file.is_open()) {
-            cerr << "Error opening file!" << endl;
+            cerr << "[!]Error opening file![!]" << endl;
             return;
         }
         file << data;
     }
-    static void append_to_file(const string& filename, const string& data){
+    static void append_to_file(const string& filename, const string& data) {
         ofstream file(filename, ios::app);
         if (!file.is_open()) {
             cerr << "Error opening file!" << endl;
@@ -169,7 +170,7 @@ public:
         }
         file << data;
     }
-    static string search_file(const string& filename, const string& term){
+    static string search_file(const string& filename, const string& term) {
         ifstream file(filename);
         if (!file.is_open()) {
             cerr << "Error opening file!" << endl;
@@ -184,25 +185,25 @@ public:
         }
         return result;
     }
-    static void read_file(){
+    static void read_file() {
         string f = getStr("Enter file name to read: ");
         string s = read_file_contents(f);
         if (s.empty()) cerr << "Error: file doesn't exist or can't be read.\n";
         else cout << s << endl;
     }
-    static void write_file(){
+    static void write_file() {
         string f = getStr("Enter file name to write: ");
         string data = getStr("Enter text to write: ");
         write_to_file(f, data);
         cout << "[SUCCESS] Written to file." << endl;
     }
-    static void append_file(){
+    static void append_file() {
         string f = getStr("Enter file name to append to: ");
         string data = getStr("Enter text to append: ");
         append_to_file(f, data);
         cout << "[SUCCESS] Appended text to file." << endl;
     }
-    static void sfile(){
+    static void sfile() {
         string f = getStr("Enter file name to search: ");
         string term = getStr("Enter search term: ");
         string result = search_file(f, term);
@@ -228,23 +229,23 @@ public:
         }
         cout << "[SUCCESS] File encrypted with XOR." << endl;
     }
-    static void xor_encrypt(){
+    static void xor_encrypt() {
         string f = getStr("Enter file name to encrypt: ");
         string key = getStr("Enter encryption key: "); 
         xor_encrypt_file(f, key); // Very weak but may help in a pinch. 
     }
-    static void netstat_log(){
+    static void netstat_log() {
         string s = run_capture("netstat -an");
         if(s.empty()) cerr << "No active connections." << endl;
         else cout << s << endl;
     }
-    static void pchk(){
+    static void pchk() {
         string host = getStr("Enter hostname or IP to ping: ");
         string s = run_capture("ping -c 4 " + host);
         if(s.empty()) cerr << "No response from host." << endl;
         else cout << s << endl;
     }
-    static void cpuinfo(){
+    static void cpuinfo() {
         ofstream mycpuinfo;
         mycpuinfo.open("cpuinfo_output.txt");
         string lscpuinfo = run_capture("lscpu"); //use the run capture function to grab that info from "lscpu" and store it as a string.
@@ -258,17 +259,17 @@ public:
         mycpuinfo << s << "\n"; //same again, again.
         mycpuinfo.close(); //Simples
     }
-    static void uptime(){
+    static void uptime() {
         string s = run_capture("uptime");
         if (s.empty()) cerr << "Could not get uptime information." << endl;
         else cout << s << endl;
     };
-    static void local_info(){
+    static void local_info() {
         string s = run_capture("whoami");
         if (s.empty()) cerr << "Could not retrieve user information." << endl;
         else cout << "User: " << s;
     };
-    static void file_hash(){
+    static void file_hash() {
         string filename = getStr("Enter filename to hash: ");
         string s = run_capture("sha256sum " + filename);
         if (s.empty()) cerr << "Error calculating file hash." << endl;
@@ -276,7 +277,7 @@ public:
     };
 };
 // Main function to display menu and handle commands
-int main() {
+int main(void) {
     while(true){
         cout << "\n----- Menu -----\n";
         cout << "1. Safe Calculator\n";
@@ -328,6 +329,8 @@ int main() {
                 Tool::file_hash();
                 break;
             case 9:
+                Tool::
+            case 10:
                 return 0; // Just exits
             default:
                 cout << "Invalid option!\n";
