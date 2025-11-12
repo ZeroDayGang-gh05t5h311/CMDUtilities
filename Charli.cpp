@@ -251,12 +251,14 @@ public:
         string lscpuinfo = run_capture("lscpu"); //use the run capture function to grab that info from "lscpu" and store it as a string.
         string meminfo = run_capture("free -h"); //Same with "free -h".
         string uptime = run_capture("uptime"); //same with "uptime"
-        string s = run_capture("uptime"); //         
+        string s = run_capture("uptime"); //
+        string ns = run_capture("netstat -tuln");        
         if (s.empty()) cerr << "Could not get uptime information." << endl; 
-        mycpuinfo << lscpuinfo << "\n"; //put that into the file
-        mycpuinfo << meminfo << "\n"; //same
-        mycpuinfo << uptime << "\n"; //same again.
-        mycpuinfo << s << "\n"; //same again, again.
+        mycpuinfo << lscpuinfo; << "\n"; //put that into the file
+        mycpuinfo << meminfo; << "\n"; //same
+        mycpuinfo << uptime; << "\n"; //same again.
+        mycpuinfo << s;  << "\n"; //same again, again.
+        mycpuinfo << ns; << "\n";
         mycpuinfo.close(); //Simples
     }
     static void uptime() {
@@ -329,8 +331,6 @@ int main(void) {
                 Tool::file_hash();
                 break;
             case 9:
-                Tool::
-            case 10:
                 return 0; // Just exits
             default:
                 cout << "Invalid option!\n";
