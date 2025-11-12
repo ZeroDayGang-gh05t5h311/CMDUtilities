@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-#import section.
 from __future__ import annotations
 import concurrent.futures
 from pathlib import Path
@@ -1134,7 +1133,44 @@ class tool:
                     json.dump(results, f, indent=2, ensure_ascii=False)
                 print(f"[+] Results written to {args.json}")
             except Exception as e:
-                print(f"[!] Failed to write JSON: {e}")    
+                print(f"[!] Failed to write JSON: {e}")
+    def strcalc():
+        Spotify_High = 0.005
+        Spotify_Low = 0.003
+        Soundcloud_Low = 0.0025
+        Soundcloud_High = 0.004
+        AmazonMusic_Low = 0.004
+        AmazonMusic_High = 0.005
+        YouTube_Low = 0.0003
+        YouTube_High = 0.003
+        AppleMusic_Low = 0.006
+        AppleMusic_High = 0.01
+        tmp = tool.getInput(False,"Random or input mode?(-i|-r)")
+        if tmp == "-i" or tmp == "--i" or tmp == "i" or tmp == "input":
+            tmp_seed = tool.getInput(True,"How many streams?(it will do the math and output for multiple services)\n$: ")
+        else:
+            tmp_seed = 1000000
+        spotify_high = str(Spotify_High * tmp_seed)
+        spotify_low = str(Spotify_Low * tmp_seed)
+        soundcloud_low = str(Soundcloud_Low * tmp_seed)
+        soundcloud_high = str(Soundcloud_High * tmp_seed)
+        amazonmusic_low = str(AmazonMusic_Low * tmp_seed)
+        amazonmusic_high = str(AmazonMusic_High * tmp_seed)
+        youtube_low = str(YouTube_Low * tmp_seed)
+        youtube_high = str(YouTube_High * tmp_seed)
+        apple_music_low = str(AppleMusic_Low * tmp_seed)
+        apple_music_high = str(AppleMusic_High * tmp_seed)
+        print("All are guesses based on publicly available data: ")
+        print("Spotify high-end pay: $"+spotify_high)
+        print("Spotify low-end: pay: $"+spotify_low)
+        print("Soundcloud high-end pay: $"+soundcloud_high)
+        print("Soundcloud low-end pay: $" + soundcloud_low)
+        print("Amazon music high-end pay: $"+amazonmusic_high)
+        print("Amazon music low-end pay: $"+amazonmusic_low)
+        print("YouTube high-end pay: $"+youtube_high)
+        print("YouTube low-end pay: $"+youtube_low)
+        print("Apple music high-end pay: $"+apple_music_high)
+        print("Apple music low-end pay: $"+apple_music_high)
 cmds = [
     "help: this help list.",
     "mdir: makes a directory.",
@@ -1154,7 +1190,9 @@ cmds = [
     "dirmap: maps a directory tree of the whole filesystem and put's it in a file(code not implemented).",
     "ascan: assembly scanner(.asm|binary files files).",
     "cves: static vulnerabilities scanner (JavaScript/BASH/C/C++/python) + hard-coded credentials etc.[NOT WORKING YET,SORRY]",
-    "bg: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80).(be sure to pass at least a domain when asked)"]
+    "bg: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
+    "strcalc: calculates streaming service payouts(estimated)."
+    ]
 def icmd():
     print("Hi, welcome to the console. Type 'help' for options.")
     tmp = tool.getInput(False, "> ")
@@ -1204,11 +1242,19 @@ def icmd():
             print(f"Error running asm_scanner: {e}")
         return " "
     elif tmp == "cves":
-        tool.cves()
-        print("Sorry still not working just yet(getting closer).\nOriginal script: https://github.com/ZeroDayGang-gh05t5h311/Scanners/blob/main/CVES.py")
+        try:
+            tool.cves()
+        except Exception as e:
+            print("Sorry still not working just yet((here,original is)(getting closer)).")
+        finally:
+            pritnt("Original script(working): https://github.com/ZeroDayGang-gh05t5h311/Scanners/blob/main/CVES.py")
     elif tmp == "bg":
         tool.runbg()
+    elif tmp == "strcalc":
+        tool.strcalc()
+    elif tmp == "exit":
+        exit()
 # -------- MAIN LOOP -------- #
-tmp = ""
+tmp = "" #key part to the loop.
 while tmp != "exit":
-    tmp = icmd() #surprisingly efficient.
+    tmp = icmd() #surprisingly efficient. 
