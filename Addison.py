@@ -686,7 +686,7 @@ def icmd():
         return " "
     elif tmp == "cves":
         try:
-            cves_init()
+            cves()
         except Exception as e:
             print("Really don't know what happend there: I should not print.")
     elif tmp == "bg":
