@@ -5,10 +5,25 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import bisect,string,csv,json,argparse,socket,ssl,threading,queue
 import random,sys,os,subprocess,ast,operator,platform,re,io,time
+import requests,urllib3
 try:
     from cves import *
 except ModuleNotFoundError:
-    print("Module not found! You need to save a copy of: 'https://github.com/ZeroDayGang-gh05t5h311/Scanners/blob/main/CVES.py'.")
+    print("Module not found! Downloading the required file...")
+    url = 'https://github.com/ZeroDayGang-gh05t5h311/Scanners/raw/main/CVES.py'
+    local_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues    
+    try:
+        # Send a GET request to download the file
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        # Save the file to disk
+        with open(local_filename, 'wb') as file:
+            file.write(response.content)        
+        print(f"File downloaded successfully as '{local_filename}'.")
+        # Now try importing again
+        from cves import *
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading the file: {e}")
 # -------- SAFE CALCUTOR -------- # 
 class SafeCalc:
     OPS = {
@@ -593,27 +608,17 @@ class tool:
             tmp_seed = tool.getInput(True,"How many streams?(it will do the math and output for multiple services)\n$: ")
         else:
             tmp_seed = 1000000
-        spotify_high = str(Spotify_High * tmp_seed)
-        spotify_low = str(Spotify_Low * tmp_seed)
-        soundcloud_low = str(Soundcloud_Low * tmp_seed)
-        soundcloud_high = str(Soundcloud_High * tmp_seed)
-        amazonmusic_low = str(AmazonMusic_Low * tmp_seed)
-        amazonmusic_high = str(AmazonMusic_High * tmp_seed)
-        youtube_low = str(YouTube_Low * tmp_seed)
-        youtube_high = str(YouTube_High * tmp_seed)
-        apple_music_low = str(AppleMusic_Low * tmp_seed)
-        apple_music_high = str(AppleMusic_High * tmp_seed)
+        spotify_high = str(Spotify_High * tmp_seed);spotify_low = str(Spotify_Low * tmp_seed)
+        soundcloud_low = str(Soundcloud_Low * tmp_seed); soundcloud_high = str(Soundcloud_High * tmp_seed)
+        amazonmusic_low = str(AmazonMusic_Low * tmp_seed); amazonmusic_high = str(AmazonMusic_High * tmp_seed)
+        youtube_low = str(YouTube_Low * tmp_seed); youtube_high = str(YouTube_High * tmp_seed)
+        apple_music_low = str(AppleMusic_Low * tmp_seed); apple_music_high = str(AppleMusic_High * tmp_seed)
         print("All are guesses based on publicly available data: ")
-        print("Spotify high-end pay: $"+spotify_high)
-        print("Spotify low-end: pay: $"+spotify_low)
-        print("Soundcloud high-end pay: $"+soundcloud_high)
-        print("Soundcloud low-end pay: $" + soundcloud_low)
-        print("Amazon music high-end pay: $"+amazonmusic_high)
-        print("Amazon music low-end pay: $"+amazonmusic_low)
-        print("YouTube high-end pay: $"+youtube_high)
-        print("YouTube low-end pay: $"+youtube_low)
-        print("Apple music high-end pay: $"+apple_music_high)
-        print("Apple music low-end pay: $"+apple_music_high)
+        print("Spotify high-end pay: $"+spotify_high); print("Spotify low-end: pay: $"+spotify_low)
+        print("Soundcloud high-end pay: $"+soundcloud_high); print("Soundcloud low-end pay: $" + soundcloud_low)
+        print("Amazon music high-end pay: $"+amazonmusic_high); print("Amazon music low-end pay: $"+amazonmusic_low)
+        print("YouTube high-end pay: $"+youtube_high); print("YouTube low-end pay: $"+youtube_low)
+        print("Apple music high-end pay: $"+apple_music_high); print("Apple music low-end pay: $"+apple_music_high)
 cmds = [
     "help: this help list.",
     "mdir: makes a directory.",
@@ -634,8 +639,7 @@ cmds = [
     "ascan: assembly scanner(.asm|binary files files).",
     "cves: static vulnerabilities scanner (JavaScript/BASH/C/C++/python) + hard-coded credentials etc.[Please give a directory to scan or it will exit]",
     "bg: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
-    "strcalc: calculates streaming service payouts(estimated)."
-    ]
+    "strcalc: calculates streaming service payouts(estimated).",]
 def icmd():
     print("Hi, welcome to the console. Type 'help' for options.")
     tmp = tool.getInput(False, "> ")
@@ -688,7 +692,7 @@ def icmd():
         try:
             cves()
         except Exception as e:
-            print("Really don't know what happend there: I should not print.")
+            print("Really don't know what happened there: I should not print.")
     elif tmp == "bg":
         tool.runbg()
     elif tmp == "strcalc":
@@ -696,6 +700,6 @@ def icmd():
     elif tmp == "exit":
         exit()
 # -------- MAIN LOOP -------- #
-tmp = "" #key part to the loop.
-while tmp != "exit":
+tmp = "" #key part to the loop so it keeps running 
+while tmp != "exit": #unless you type 'exit'
     tmp = icmd() #surprisingly efficient 
