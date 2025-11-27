@@ -254,12 +254,12 @@ public:
         string s = run_capture("uptime"); //
         string ns = run_capture("netstat -tuln");        
         if (s.empty()) cerr << "Could not get uptime information." << endl; 
-        mycpuinfo << lscpuinfo; << "\n"; //put that into the file
-        mycpuinfo << meminfo; << "\n"; //same
-        mycpuinfo << uptime; << "\n"; //same again.
-        mycpuinfo << s;  << "\n"; //same again, again.
-        mycpuinfo << ns; << "\n";
-        mycpuinfo.close(); //Simples
+        mycpuinfo << lscpuinfo << "\n"; //put that into the file
+        mycpuinfo << meminfo << "\n"; //same
+        mycpuinfo << uptime << "\n"; //same again.
+        mycpuinfo << s << "\n"; //same again, again.
+        mycpuinfo << ns << "\n"; //once more
+        mycpuinfo.close(); //Simple's
     }
     static void uptime() {
         string s = run_capture("uptime");
@@ -280,8 +280,9 @@ public:
 };
 // Main function to display menu and handle commands
 int main(void) {
+    //Must happen in main
     while(true){
-        cout << "\n----- Menu -----\n";
+        cout << "\n----- Menu -----\n"; //
         cout << "1. Safe Calculator\n";
         cout << "2. Make Directory\n";
         cout << "3. File Operations (Read/Write/Append/Search)\n";
@@ -307,11 +308,16 @@ int main(void) {
             case 3: {
                 int op = Tool::getInt("1. Read file\n2. Write file\n3. Append file\n4. Search file\nSelect option: ");
                 switch(op) {
-                    case 1: Tool::read_file(); break;
-                    case 2: Tool::write_file(); break;
-                    case 3: Tool::append_file(); break;
-                    case 4: Tool::sfile(); break;
-                    default: break;
+                    case 1: 
+                        Tool::read_file(); break;
+                    case 2: 
+                        Tool::write_file(); break;
+                    case 3: 
+                        Tool::append_file(); break;
+                    case 4: 
+                        Tool::sfile(); break;
+                    default: 
+                        break;
                 }
                 break;
             }
@@ -335,6 +341,6 @@ int main(void) {
             default:
                 cout << "Invalid option!\n";
         };
-    };
-    return 0;
+    }; // Surprisingly effective.
+    return 0; 
 };
