@@ -29,13 +29,12 @@
 #include <pwd.h>
 #include <sys/types.h>
 using namespace std;
-
 #ifdef _WIN32
 #define OS_WIN 1
 #else
 #define OS_WIN 0
 #endif
-
+using namespace std;
 // -------- Command runner --------
 class Tool {
 public:
@@ -59,7 +58,6 @@ public:
     #endif
         return data;
     }
-
     static int run_system(const string& cmd) {
         int rc = system(cmd.c_str());
         if(rc != 0) {
@@ -67,7 +65,6 @@ public:
         }
         return rc;
     }
-
     static int getInt(const string& prompt) {
         cout << prompt;
         string s; 
@@ -79,14 +76,12 @@ public:
             return 0; 
         }
     }
-
     static string getStr(const string& prompt){
         cout << prompt;
         string s; 
         getline(cin, s);
         return s;
     }
-
     /* -------- SafeCalc -------- */
     struct Parser {
         string s; size_t i{0};
@@ -106,7 +101,7 @@ public:
             size_t j=i;
             if(i<s.size() && (s[i]=='+'||s[i]=='-')) ++i;
             while(i<s.size() && (isdigit((unsigned char)s[i]) || s[i]=='.')) ++i;
-            if(j==i) throw runtime_error("expected number");
+            if(j==i) throw runtime_error("expected number"); 
             return stod(s.substr(j,i-j));
         }
         double expr() { 
@@ -163,7 +158,6 @@ public:
             }
         }
     };
-
     static bool safe_eval(const string& e, double& out) {
         try{
             Parser p{e,0};
@@ -176,7 +170,6 @@ public:
             return false;
         }
     }
-
     // -------- Features --------
     static void mdir() {
         string d = getStr("Directory name please: ");
@@ -197,7 +190,6 @@ public:
         else
             cerr << "[ERROR]: Failed to get current directory path." << endl;
     }
-
     static string read_file_contents(const string& filename) {
         ifstream file(filename);
         if (!file.is_open()) {
@@ -208,7 +200,6 @@ public:
         buffer << file.rdbuf();
         return buffer.str();
     }
-
     static void write_to_file(const string& filename, const string& data) {
         ofstream file(filename);
         if (!file.is_open()) {
@@ -218,7 +209,6 @@ public:
         file << data;
         cout << "[INFO]: Data written to file: " << filename << endl;
     }
-
     static void append_to_file(const string& filename, const string& data) {
         ofstream file(filename, ios::app);
         if (!file.is_open()) {
@@ -228,7 +218,6 @@ public:
         file << data;
         cout << "[INFO]: Data appended to file: " << filename << endl;
     }
-
     static string search_file(const string& filename, const string& term) {
         ifstream file(filename);
         if (!file.is_open()) {
@@ -244,26 +233,22 @@ public:
         }
         return result;
     }
-
     static void read_file() {
         string f = getStr("Enter file name to read: ");
         string s = read_file_contents(f);
         if (s.empty()) cerr << "[ERROR]: File is empty or cannot be read." << endl;
         else cout << "[INFO]: File contents:\n" << s << endl;
     }
-
     static void write_file() {
         string f = getStr("Enter file name to write: ");
         string data = getStr("Enter text to write: ");
         write_to_file(f, data);
     }
-
     static void append_file() {
         string f = getStr("Enter file name to append to: ");
         string data = getStr("Enter text to append: ");
         append_to_file(f, data);
     }
-
     static void sfile() {
         string f = getStr("Enter file name to search: ");
         string term = getStr("Enter search term: ");
@@ -271,7 +256,6 @@ public:
         if (result.empty()) cout << "[INFO]: No results found.\n";
         else cout << "[INFO]: Search results:\n" << result << endl;
     }
-
     static void xor_encrypt_file(const string& filename, const string& key){
         ifstream file(filename, ios::binary);
         if (!file.is_open()) {
@@ -283,7 +267,6 @@ public:
             cerr << "[ERROR]: Could not create output file for encryption: encrypted_" << filename << endl;
             return;
         }
-
         char ch;
         size_t i = 0;
         while (file.get(ch)) {
@@ -293,26 +276,22 @@ public:
         }
         cout << "[INFO]: File encrypted successfully: encrypted_" << filename << endl;
     }
-
     static void xor_encrypt() {
         string f = getStr("Enter file name to encrypt: ");
         string key = getStr("Enter encryption key: ");
         xor_encrypt_file(f, key); 
     }
-
     static void netstat_log() {
         string s = run_capture("netstat -an");
         if(s.empty()) cerr << "[ERROR]: No active connections or failed to fetch data." << endl;
         else cout << "[INFO]: Active network connections:\n" << s << endl;
     }
-
     static void pchk() {
         string host = getStr("Enter hostname or IP to ping: ");
         string s = run_capture("ping -c 4 " + host);
         if(s.empty()) cerr << "[ERROR]: No response from host." << endl;
         else cout << "[INFO]: Ping results:\n" << s << endl;
     }
-
     static void cpuinfo() {
         ofstream mycpuinfo;
         mycpuinfo.open("cpuinfo_output.txt");
@@ -321,7 +300,6 @@ public:
         string uptime = run_capture("uptime");
         string s = run_capture("uptime");
         string ns = run_capture("netstat -tuln");
-
         if (s.empty()) cerr << "[ERROR]: Could not get uptime information." << endl; 
         mycpuinfo << lscpuinfo << "\n"; 
         mycpuinfo << meminfo << "\n"; 
@@ -329,29 +307,24 @@ public:
         mycpuinfo << s << "\n"; 
         mycpuinfo << ns << "\n"; 
         mycpuinfo.close(); 
-
         cout << "[INFO]: CPU information saved to cpuinfo_output.txt" << endl;
     }
-
     static void uptime() {
         string s = run_capture("uptime");
         if (s.empty()) cerr << "[ERROR]: Could not get uptime information." << endl;
         else cout << "[INFO]: Uptime: " << s << endl;
     }
-
     static void local_info() {
         string s = run_capture("whoami");
         if (s.empty()) cerr << "[ERROR]: Could not retrieve user information." << endl;
         else cout << "[INFO]: Current user: " << s << endl;
     }
-
     static void file_hash() {
         string filename = getStr("Enter filename to hash: ");
         string s = run_capture("sha256sum " + filename);
         if (s.empty()) cerr << "[ERROR]: Error calculating file hash." << endl;
         else cout << "[INFO]: File SHA256 Hash: " << s << endl;
     }
-
     static void dirmap(int argc, char* argv[]) {
         std::vector<std::string> paths;
         if (argc > 1) {
@@ -359,14 +332,12 @@ public:
                 paths.push_back(argv[i]);
             }
         }
-
         try {
             map_and_write_directory_tree(paths);
         } catch (const std::exception& e) {
             cerr << "[ERROR]: Directory mapping failed: " << e.what() << endl;
         }
     }
-
     static void map_and_write_directory_tree(const std::vector<std::string>& start_paths = {}, const std::string& output_file = "directory_map.txt") {
         namespace fs = std::filesystem;
         std::vector<std::string> paths_to_map = start_paths;
@@ -435,8 +406,7 @@ public:
         std::cout << "[INFO]: Directory map saved to " << output_file << "\n";
     }
 };
-
-// Main function to display menu and handle commands
+// Main function to disp lay menu and handle commands
 int main(int argc, char* argv[]) {
     while(true){
         cout << "\n----- Menu -----\n";
@@ -466,11 +436,21 @@ int main(int argc, char* argv[]) {
             case 3: {
                 int op = Tool::getInt("1. Read file\n2. Write file\n3. Append file\n4. Search file\nSelect option: ");
                 switch(op) {
-                    case 1: Tool::read_file(); break;
-                    case 2: Tool::write_file(); break;
-                    case 3: Tool::append_file(); break;
-                    case 4: Tool::sfile(); break;
-                    default: break;
+                    case 1: 
+                        Tool::read_file(); 
+                        break;
+                    case 2: 
+                        Tool::write_file(); 
+                        break;
+                    case 3: 
+                        Tool::append_file(); 
+                        break;
+                    case 4: 
+                        Tool::sfile();  
+                        break;
+                    default:
+                        cout << "Oh dear, wrong input: exiting!" << endl; 
+                        break;
                 }
                 break;
             }
@@ -496,8 +476,7 @@ int main(int argc, char* argv[]) {
                 return 0; // Just exits
             default:
                 cout << "Invalid option!\n";
-        }
-    } // Surprisingly effective.
+        };
+    }; // Surprisingly effective.
     return 0;
 };
-
