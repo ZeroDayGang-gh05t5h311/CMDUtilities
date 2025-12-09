@@ -1,38 +1,25 @@
-#include <bits/stdc++.h>
 #include <iostream>
 #include <fstream>
-#if __has_include(<filesystem>)
-  #include <filesystem>
-  namespace fs = std::filesystem;
-#endif
-#ifdef _WIN32
-#include <direct.h>
-#else
-#include <unistd.h>
-#endif
-#include <future>  // Added for parallelism
-#include <mutex>
-#include <thread>
-#include <chrono>
-#include <iostream>
+#include <filesystem>
+namespace fs = std::filesystem;
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <array>
 #include <sstream>
 #include <vector>
-#include <regex>
-#include <algorithm>
-#include <set>
-#include <unistd.h>
-#include <pwd.h>
-#include <sys/types.h>
-using namespace std;
-#ifdef _WIN32
-#define OS_WIN 1
+#include <cmath>
+#include <array>
+#include <cerrno>
+#if defined(_WIN32)
+    #include <direct.h>
+    #include <windows.h>
+    #define OS_WIN 1
+    #define getcwd _getcwd
 #else
-#define OS_WIN 0
+    #include <unistd.h>
+    #include <pwd.h>
+    #define OS_WIN 0
 #endif
 using namespace std;
 // -------- Command runner --------
@@ -173,22 +160,15 @@ public:
     // -------- Features --------
     static void mdir() {
         string d = getStr("Directory name please: ");
-        #if __has_include(<filesystem>)
-            error_code ec;
-            fs::create_directories(d, ec);
-            if(ec) cerr << "[ERROR]: mkdir: " << ec.message() << "\n";
-        #else
-            #if OS_WIN
-                run_system(string("mkdir \"")+d+"\"");
-            #else
-                run_system(string("mkdir -p \"")+d+"\"");
-            #endif
-        #endif
-        char cwd[1024]; 
-        if(getcwd(cwd,sizeof(cwd))) 
+        error_code ec;
+        fs::create_directories(d, ec);
+        if(ec)
+            cerr << "[ERROR]: mkdir: " << ec.message() << "\n";
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)))
             cout << "[INFO]: Directory '" << d << "' created successfully. Current path: " << cwd << "\n";
         else
-            cerr << "[ERROR]: Failed to get current directory path." << endl;
+            cerr << "[ERROR]: Failed to get current directory path.\n";
     }
     static string read_file_contents(const string& filename) {
         ifstream file(filename);
@@ -224,8 +204,7 @@ public:
             cerr << "[ERROR]: Could not open file for searching: " << filename << endl;
             return "";
         }
-        string line;
-        string result;
+        string result, line;
         while (getline(file, line)) {
             if (line.find(term) != string::npos) {
                 result += line + "\n";
@@ -257,6 +236,10 @@ public:
         else cout << "[INFO]: Search results:\n" << result << endl;
     }
     static void xor_encrypt_file(const string& filename, const string& key){
+        if (key.empty()) {
+            cerr << "[ERROR]: Key cannot be empty.\n";
+            return;
+        }
         ifstream file(filename, ios::binary);
         if (!file.is_open()) {
             cerr << "[ERROR]: Could not open file for encryption: " << filename << endl;
@@ -264,7 +247,7 @@ public:
         }
         ofstream outfile("encrypted_" + filename, ios::binary);
         if (!outfile.is_open()) {
-            cerr << "[ERROR]: Could not create output file for encryption: encrypted_" << filename << endl;
+            cerr << "[ERROR]: Could not create output file: encrypted_" << filename << endl;
             return;
         }
         char ch;
@@ -282,132 +265,131 @@ public:
         xor_encrypt_file(f, key); 
     }
     static void netstat_log() {
+    #if OS_WIN
         string s = run_capture("netstat -an");
+    #else
+        string s = run_capture("netstat -an");
+    #endif
         if(s.empty()) cerr << "[ERROR]: No active connections or failed to fetch data." << endl;
         else cout << "[INFO]: Active network connections:\n" << s << endl;
     }
     static void pchk() {
         string host = getStr("Enter hostname or IP to ping: ");
+    #if OS_WIN
+        string s = run_capture("ping -n 4 " + host);
+    #else
         string s = run_capture("ping -c 4 " + host);
+    #endif
         if(s.empty()) cerr << "[ERROR]: No response from host." << endl;
         else cout << "[INFO]: Ping results:\n" << s << endl;
     }
     static void cpuinfo() {
-        ofstream mycpuinfo;
-        mycpuinfo.open("cpuinfo_output.txt");
-        string lscpuinfo = run_capture("lscpu");
-        string meminfo = run_capture("free -h");
-        string uptime = run_capture("uptime");
-        string s = run_capture("uptime");
-        string ns = run_capture("netstat -tuln");
-        if (s.empty()) cerr << "[ERROR]: Could not get uptime information." << endl; 
-        mycpuinfo << lscpuinfo << "\n"; 
-        mycpuinfo << meminfo << "\n"; 
-        mycpuinfo << uptime << "\n"; 
-        mycpuinfo << s << "\n"; 
-        mycpuinfo << ns << "\n"; 
-        mycpuinfo.close(); 
+        ofstream mycpuinfo("cpuinfo_output.txt");
+    #if OS_WIN
+        string cpu = run_capture("wmic cpu get name");
+        string mem = run_capture("wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /format:table");
+        string up  = run_capture("net statistics workstation");
+
+        mycpuinfo << cpu << "\n" << mem << "\n" << up << "\n";
+    #else
+        mycpuinfo << run_capture("lscpu") << "\n";
+        mycpuinfo << run_capture("free -h") << "\n";
+        mycpuinfo << run_capture("uptime") << "\n";
+        mycpuinfo << run_capture("netstat -tuln") << "\n";
+    #endif
         cout << "[INFO]: CPU information saved to cpuinfo_output.txt" << endl;
-    }
-    static void uptime() {
-        string s = run_capture("uptime");
-        if (s.empty()) cerr << "[ERROR]: Could not get uptime information." << endl;
-        else cout << "[INFO]: Uptime: " << s << endl;
-    }
-    static void local_info() {
-        string s = run_capture("whoami");
-        if (s.empty()) cerr << "[ERROR]: Could not retrieve user information." << endl;
-        else cout << "[INFO]: Current user: " << s << endl;
     }
     static void file_hash() {
         string filename = getStr("Enter filename to hash: ");
-        string s = run_capture("sha256sum " + filename);
+    #if OS_WIN
+        string s = run_capture("certutil -hashfile \"" + filename + "\" SHA256");
+    #else
+        string s = run_capture("sha256sum \"" + filename + "\"");
+    #endif
         if (s.empty()) cerr << "[ERROR]: Error calculating file hash." << endl;
         else cout << "[INFO]: File SHA256 Hash: " << s << endl;
     }
-    static void dirmap(int argc, char* argv[]) {
-        std::vector<std::string> paths;
-        if (argc > 1) {
-            for (int i = 1; i < argc; ++i) {
-                paths.push_back(argv[i]);
-            }
-        }
+    static void dirmap() {
+        vector<string> paths;
+            for (int i = 1; i < 0; ++i) paths.push_back(0);
         try {
             map_and_write_directory_tree(paths);
-        } catch (const std::exception& e) {
+        } catch (const exception& e) {
             cerr << "[ERROR]: Directory mapping failed: " << e.what() << endl;
         }
     }
-    static void map_and_write_directory_tree(const std::vector<std::string>& start_paths = {}, const std::string& output_file = "directory_map.txt") {
-        namespace fs = std::filesystem;
-        std::vector<std::string> paths_to_map = start_paths;
+    static void map_and_write_directory_tree(const vector<string>& start_paths = {}, const string& output_file = "directory_map.txt") {
+        vector<string> paths_to_map = start_paths;
         if (paths_to_map.empty()) {
         #ifdef _WIN32
             for (char drive = 'A'; drive <= 'Z'; ++drive) {
-                std::string drive_path = std::string(1, drive) + ":\\";
-                if (fs::exists(drive_path)) {
+                string drive_path = string(1, drive) + ":\\";
+                if (fs::exists(drive_path))
                     paths_to_map.push_back(drive_path);
-                }
             }
         #else
             if (fs::exists("/") && fs::is_directory("/")) {
                 paths_to_map.push_back("/");
             } else {
-                std::cerr << "Unable to access the root directory. Falling back to the home directory...\n";
-                const char* home = getenv("HOME"); 
+                const char* home = getenv("HOME");
                 if (!home || !fs::exists(home)) {
                     struct passwd* pw = getpwuid(getuid());
-                    if (pw) {
-                        home = pw->pw_dir;
-                    }
-                    if (!home || !fs::exists(home)) {
-                        std::cerr << "Unable to determine home directory. Exiting.\n";
-                        return;
-                    }
+                    if (pw) home = pw->pw_dir;
+                }
+                if (!home || !fs::exists(home)) {
+                    cerr << "Unable to determine home directory.\n";
+                    return;
                 }
                 paths_to_map.push_back(home);
-                std::cerr << "You need to run the program as root to access the full directory map.\n";
             }
         #endif
         }
-        std::cout << "[INFO]: Mapping directories from ";
-        for (const auto& path : paths_to_map) {
-            std::cout << path << " ";
-        }
-        std::cout << "...\n";
-        std::ofstream f(output_file, std::ios::out);
+        cout << "[INFO]: Mapping directories from ";
+        for (const auto& path : paths_to_map)
+            cout << path << " ";
+        cout << "...\n";
+
+        ofstream f(output_file);
         if (!f.is_open()) {
-            std::cerr << "[ERROR]: Failed to open file for writing directory map.\n";
+            cerr << "[ERROR]: Failed to open directory map output file.\n";
             return;
         }
         for (const auto& start_path : paths_to_map) {
-            fs::path base_path(start_path);
-            f << base_path.string() + "/\n";
+            fs::path base(start_path);
+            f << base.string() + "/\n";
+
             try {
-                for (auto& entry : fs::recursive_directory_iterator(base_path)) {
+                for (auto& entry : fs::recursive_directory_iterator(
+                        base,
+                        fs::directory_options::skip_permission_denied))
+                {
                     if (entry.is_directory()) {
-                        fs::path current_path = entry.path();
-                        auto rel_parts = current_path.relative_path();
-                        size_t level = rel_parts.empty() ? 0 : std::distance(rel_parts.begin(), rel_parts.end());
-                        std::string indent = std::string("│   ", level - 1) + (level > 0 ? "├── " : "");
-                        f << indent << current_path.filename().string() + "/\n";
-                        std::string subindent = std::string("│   ", level) + "├── ";
-                        for (auto& file : fs::directory_iterator(current_path)) {
+                        fs::path cur = entry.path();
+                        auto rel = fs::relative(cur, base);
+
+                        size_t level = distance(rel.begin(), rel.end());
+
+                        string indent = string("│   ", level > 0 ? level - 1 : 0) + (level > 0 ? "├── " : "");
+                        f << indent << cur.filename().string() + "/\n";
+
+                        string subindent = string("│   ", level) + "├── ";
+                        for (auto& file : fs::directory_iterator(cur)) {
                             if (file.is_regular_file()) {
                                 f << subindent << file.path().filename().string() << "\n";
                             }
                         }
                     }
                 }
-            } catch (const std::exception& e) {
-                std::cerr << "[ERROR]: Error accessing " << start_path << ": " << e.what() << "\n";
+            }
+            catch (const exception& e) {
+                cerr << "[ERROR]: Access error at " << start_path << ": " << e.what() << "\n";
             }
         }
-        std::cout << "[INFO]: Directory map saved to " << output_file << "\n";
+        cout << "[INFO]: Directory map saved to " << output_file << "\n";
     }
 };
-// Main function to disp lay menu and handle commands
-int main(int argc, char* argv[]) {
+// -------- Main Menu --------
+int main(void) {
     while(true){
         cout << "\n----- Menu -----\n";
         cout << "1. Safe Calculator\n";
@@ -436,18 +418,10 @@ int main(int argc, char* argv[]) {
             case 3: {
                 int op = Tool::getInt("1. Read file\n2. Write file\n3. Append file\n4. Search file\nSelect option: ");
                 switch(op) {
-                    case 1: 
-                        Tool::read_file(); 
-                        break;
-                    case 2: 
-                        Tool::write_file(); 
-                        break;
-                    case 3: 
-                        Tool::append_file(); 
-                        break;
-                    case 4: 
-                        Tool::sfile();  
-                        break;
+                    case 1: Tool::read_file(); break;
+                    case 2: Tool::write_file(); break;
+                    case 3: Tool::append_file(); break;
+                    case 4: Tool::sfile(); break;
                     default:
                         cout << "Oh dear, wrong input: exiting!" << endl; 
                         break;
@@ -470,13 +444,13 @@ int main(int argc, char* argv[]) {
                 Tool::file_hash();
                 break;
             case 9:
-                Tool::dirmap(argc, argv);
+                Tool::dirmap();
                 break;
             case 10:
-                return 0; // Just exits
+                return 0;
             default:
-                cout << "Invalid option!\n";
-        };
-    }; // Surprisingly effective.
+                cout << "Invalid option!\n" << endl;
+        }
+    }
     return 0;
-};
+}
