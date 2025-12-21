@@ -407,7 +407,7 @@ int main(int argc, char* argv[]) {
     UpdaterManager manager;
     if (argc > 1) {
         string arg = argv[1];
-        if (arg == "--help" || arg == "help" || arg  == "--h" || arg == "-h" || arg "") {
+        if (arg == "--help" || arg == "help" || arg  == "--h" || arg == "-h" || arg == "" || arg == " ") {
             cout << "0(-h|--help|help|--help): show this help menu." << endl;
             cout << "1(-r|--run|--r): runs the code " << endl;
         }
