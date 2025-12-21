@@ -8,18 +8,34 @@
 #include <map>
 #include <sstream>
 #include <unistd.h> // for gethostname
+
 using namespace std;
+
 // Thread-safe logging utility
 mutex logMutex;
 ofstream logFile;
+
 void logMessage(const string& message) {
     lock_guard<mutex> lock(logMutex);
+
+    if (!logFile.is_open()) {
+        cerr << "Log file is not open. Message skipped.\n";
+        return;
+    }
+
     time_t now = time(0);
-    string dt = ctime(&now);
+    char* timeStr = ctime(&now);
+    if (!timeStr) {
+        cerr << "Failed to get current time.\n";
+        return;
+    }
+
+    string dt = timeStr;
     dt.pop_back();
     logFile << "[" << dt << "] " << message << endl;
     cout << message << endl;
 }
+
 // Abstract class
 class OSUpdater {
 public:
@@ -62,7 +78,7 @@ private:
 
     bool commandExists(const string& cmd) {
         string check = "command -v " + cmd + " > /dev/null 2>&1";
-        return (system(check.c_str()) == 0);
+        return system(check.c_str()) == 0;
     }
 
 public:
@@ -111,6 +127,7 @@ public:
         else log("No known package manager found.");
     }
 };
+
 // Updater manager
 class UpdaterManager {
 private:
@@ -119,16 +136,21 @@ private:
 
     string detectOS() {
         if (system("ver > nul 2>&1") == 0) return "Windows";
+
         if (system("uname -s > /dev/null 2>&1") == 0) {
-            string line;
             ifstream osRelease("/etc/os-release");
-            if (osRelease.is_open()) {
-                while (getline(osRelease, line)) {
-                    if (line.find("NAME=") == 0) {
-                        string val = line.substr(5);
-                        if (!val.empty() && val.front() == '"') val = val.substr(1, val.size() - 2);
-                        return val;
-                    }
+            if (!osRelease.is_open()) {
+                cerr << "Failed to open /etc/os-release\n";
+                return "Linux";
+            }
+
+            string line;
+            while (getline(osRelease, line)) {
+                if (line.find("NAME=") == 0) {
+                    string val = line.substr(5);
+                    if (!val.empty() && val.front() == '"')
+                        val = val.substr(1, val.size() - 2);
+                    return val;
                 }
             }
             return "Linux";
@@ -154,22 +176,33 @@ public:
         updater->cleanUp();
     }
 };
+
 // Utility for system info
 string gatherSystemInfo() {
     ostringstream ss;
+
     char hostname[256];
     if (gethostname(hostname, sizeof(hostname)) == 0) {
         ss << "Hostname: " << hostname << "\n";
+    } else {
+        ss << "Hostname: unavailable\n";
     }
+
     char* user = getenv("USER");
     if (user) ss << "User: " << user << "\n";
+    else ss << "User: unavailable\n";
+
     time_t now = time(0);
-    ss << "Current Time: " << ctime(&now);
+    char* timeStr = ctime(&now);
+    if (timeStr) ss << "Current Time: " << timeStr;
+    else ss << "Current Time: unavailable\n";
+
     return ss.str();
 }
+
 void showHelp() {
     cout << "Usage:\n";
-    cout << "  --h [-f file]     Perform system update (log to file, default system_update.log)\n";
+    cout << "  --r [-f file]     Perform system update (log to file, default system_update.log)\n";
     cout << "  --os [-f file]    Show detected OS (or log to file)\n";
     cout << "  --info [-f file]  Show system info (or log to file)\n";
     cout << "  --help            Show this help message\n";
@@ -178,17 +211,21 @@ void showHelp() {
 int main(int argc, char* argv[]) {
     UpdaterManager manager;
 
-    // default log file if none provided
-    string logFilename = "system_update.log";
-
     if (argc > 1) {
         string arg1 = argv[1];
 
-        if (arg1 == "--h") {
+        if (arg1 == "--r") {
             if (argc > 3 && string(argv[2]) == "-f") {
-                logFilename = argv[3];
+                logFile.open(argv[3], ios::app);
+            } else {
+                logFile.open("system_update.log", ios::app);
             }
-            logFile.open(logFilename, ios::app);
+
+            if (!logFile.is_open()) {
+                cerr << "Failed to open log file.\n";
+                return 1;
+            }
+
             manager.performUpdate();
             logFile.close();
             return 0;
@@ -197,6 +234,10 @@ int main(int argc, char* argv[]) {
             string os = manager.getOS();
             if (argc > 3 && string(argv[2]) == "-f") {
                 ofstream out(argv[3]);
+                if (!out.is_open()) {
+                    cerr << "Failed to open output file.\n";
+                    return 1;
+                }
                 out << "Detected OS: " << os << endl;
             } else {
                 cout << "Detected OS: " << os << endl;
@@ -207,6 +248,10 @@ int main(int argc, char* argv[]) {
             string info = gatherSystemInfo();
             if (argc > 3 && string(argv[2]) == "-f") {
                 ofstream out(argv[3]);
+                if (!out.is_open()) {
+                    cerr << "Failed to open output file.\n";
+                    return 1;
+                }
                 out << info;
             } else {
                 cout << info;
@@ -223,7 +268,6 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
+
     cout << "No arguments provided.\n";
     showHelp();
-    return 0;
-}
