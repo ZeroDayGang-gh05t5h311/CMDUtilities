@@ -2,6 +2,7 @@
 from __future__ import annotations
 import concurrent.futures
 from pathlib import Path
+from threading import Lock
 from typing import List, Dict, Any, Tuple
 import bisect,string,csv,json,argparse,socket,ssl,threading,queue
 import random,sys,os,subprocess,ast,operator,platform,re,io,time
@@ -13,7 +14,7 @@ except ModuleNotFoundError:
     url = 'https://github.com/ZeroDayGang-gh05t5h311/Scanners/raw/main/CVES.py'
     local_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues    
     try:
-        # Send a GET request to download the fileex
+        # Send a GET request to download the file
         response = requests.get(url)
         response.raise_for_status()  # Raise an exception for HTTP errors
         # Save the file to disk
@@ -23,7 +24,7 @@ except ModuleNotFoundError:
         # Now try importing again
         from cves import *
     except requests.exceptions.RequestException as e:
-        print(f"Error downloading the file: {e}\nPlease check your network connection.")
+        print(f"Error downloading the file: {e}")
 # -------- SAFE CALCUTOR -------- # 
 class SafeCalc:
     OPS = {
@@ -97,7 +98,7 @@ class tool:
     def write(fname):
         tmp_data = tool.getInput(False, "> ")
         try:
-            with open(fname, "w") as tmp_var:
+            with open(fname, "a+") as tmp_var:
                 tmp_var.write(tmp_data)
         except FileNotFoundError:
             print("File not found!")
@@ -105,7 +106,7 @@ class tool:
     def appendFile():
         apfname = tool.getInput(False, "Filename please.\n$: ")
         tofile = tool.getInput(False, "To add to the file...$: ")
-        with open(apfname, "a+") as fileOpen:
+        with open(apfname, "a") as fileOpen:
             fileOpen.write(f"\n{tofile}")
         print("Written to file...")
     @staticmethod
@@ -271,9 +272,6 @@ class tool:
         mode: "--asm" (path is asm file) or "--bin" (path is binary file to objdump)
         Returns a list of detected issue strings and also prints results (similar to C++ original).
         """
-        import concurrent.futures
-        from pathlib import Path
-        from threading import Lock
         # Prepare pattern groups (translated from C++)
         def get_asm_vuln_patterns():
             return [
@@ -615,7 +613,7 @@ class tool:
         apple_music_low = str(AppleMusic_Low * tmp_seed); apple_music_high = str(AppleMusic_High * tmp_seed)
         print("All are guesses based on publicly available data: ")
         print("Spotify high-end pay: $"+spotify_high); print("Spotify low-end: pay: $"+spotify_low)
-        print("Sound-cloud high-end pay: $"+soundcloud_high); print("Sound-cloud low-end pay: $" + soundcloud_low)
+        print("Soundcloud high-end pay: $"+soundcloud_high); print("Soundcloud low-end pay: $" + soundcloud_low)
         print("Amazon music high-end pay: $"+amazonmusic_high); print("Amazon music low-end pay: $"+amazonmusic_low)
         print("YouTube high-end pay: $"+youtube_high); print("YouTube low-end pay: $"+youtube_low)
         print("Apple music high-end pay: $"+apple_music_high); print("Apple music low-end pay: $"+apple_music_high)
@@ -639,10 +637,9 @@ cmds = [
     "ascan: assembly scanner(.asm|binary files files).",
     "cves: static vulnerabilities scanner (JavaScript/BASH/C/C++/python) + hard-coded credentials etc.[Please give a directory to scan or it will exit]",
     "bg: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
-    "strcalc: calculates streaming service payouts(estimated).",
-    "clear: clears the screen and the python cache.\n"]
+    "strcalc: calculates streaming service payouts(estimated).",]
 def icmd():
-    print("Hi, welcome to the console. Type 'help' for options.\n{>>>>>[ADDISON]<<<<<}\n")
+    print("Hi, welcome to the console. Type 'help' for options.")
     tmp = tool.getInput(False, "> ")
     if tmp == "exit":
         return "exit"
@@ -698,12 +695,9 @@ def icmd():
         tool.runbg()
     elif tmp == "strcalc":
         tool.strcalc()
-    elif tmp == "clear":
-        tool.cmd("clear")
-        tool.cmd("rm -rf __pycache__")
     elif tmp == "exit":
         exit()
 # -------- MAIN LOOP -------- #
-tmp = "" #key part to the loop so it keeps running. 
-while tmp != "exit": #unless you type 'exit'.
-    tmp = icmd() #surprisingly efficient.
+tmp = "" #key part to the loop so it keeps running 
+while tmp != "exit": #unless you type 'exit'
+    tmp = icmd() #surprisingly efficient
