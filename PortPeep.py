@@ -75,7 +75,6 @@ class NetworkMonitor:
                 return
             port = int(port)
             alert_key = f"conn:{ip}:{port}"
-
             if port not in self.ALLOWED_PORTS and not self.is_ip_allowed(ip):
                 if self.rate_limited(alert_key):
                     return
@@ -130,7 +129,6 @@ class NetworkMonitor:
             threads.append(t)
         for t in threads:
             t.join()
-    # ---------- Runner ----------
     def run(self, continuous=False):
         if os.geteuid() != 0:
             print("Must be run as root.")
