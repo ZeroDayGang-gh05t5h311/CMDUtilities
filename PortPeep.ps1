@@ -1,131 +1,89 @@
-$AllowedPorts = @(22, 53, 80, 443)
-$AllowedIPRanges = @(
-    "127.0.0.0/8",
-    "192.168.1.0/24"
+# Requires PowerShell 5+
+param(
+    [switch]$Continuous,
+    [switch]$OneTime,
+    [switch]$Terminal
 )
-$LogFile = "C:\ProgramData\network_monitor.log"
+# Configuration
+$AllowedPorts = @(22,53,80,443)
+$AllowedIPRanges = @("127.0.0.0/8","192.168.1.0/24","::1/128")
 $RateLimitSeconds = 60
-$PollInterval = 10
+$LogFile = "C:\network_monitor.log"
+$DiskThresholdGB = 1
 $AlertCache = @{}
-$TerminalOutput = $false
-$Continuous = $false
-foreach ($arg in $args) {
-    switch ($arg) {
-        "-c" { $Continuous = $true }
-        "-o" { $Continuous = $false }
-        "--terminal" { $TerminalOutput = $true }
-    }
+# Function to log messages
+function Write-Log($Message, $Level="INFO") {
+    $Time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $LogLine = "$Time - $Level - $Message"
+    Add-Content -Path $LogFile -Value $LogLine
+    if ($Terminal) { Write-Host $LogLine }
 }
-function Write-Log {
-    param (
-        [string]$Level,
-        [string]$Message
-    )
-    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    $line = "$timestamp [$Level] $Message"
-    Add-Content -Path $LogFile -Value $line
-    if ($TerminalOutput) {
-        Write-Host $line
-    }
-}
-function Rate-Limited {
-    param ([string]$Key)
-    $now = Get-Date
+# Rate limiting
+function Is-RateLimited($Key) {
     if ($AlertCache.ContainsKey($Key)) {
-        $last = $AlertCache[$Key]
-        if (($now - $last).TotalSeconds -lt $RateLimitSeconds) {
-            return $true
-        }
+        $Last = $AlertCache[$Key]
+        if ((Get-Date) - $Last -lt ([TimeSpan]::FromSeconds($RateLimitSeconds))) { return $true }
     }
-    $AlertCache[$Key] = $now
+    $AlertCache[$Key] = Get-Date
     return $false
 }
-function IP-In-Range {
-    param (
-        [string]$IP,
-        [string]$CIDR
-    )
-    $parts = $CIDR.Split("/")
-    $network = [System.Net.IPAddress]::Parse($parts[0]).GetAddressBytes()
-    $maskBits = [int]$parts[1]
-    $ipBytes = [System.Net.IPAddress]::Parse($IP).GetAddressBytes()
-    $mask = [uint32]0
-    for ($i = 0; $i -lt $maskBits; $i++) {
-        $mask = $mask -bor (1 -shl (31 - $i))
+# Disk space check
+function Check-DiskSpace {
+    $FreeGB = (Get-PSDrive C).Free/1GB
+    if ($FreeGB -lt $DiskThresholdGB) {
+        Write-Log "Disk space is low! Stopping script." "ERROR"
+        return $false
     }
-    $ipInt = [BitConverter]::ToUInt32($ipBytes[::-1], 0)
-    $netInt = [BitConverter]::ToUInt32($network[::-1], 0)
-    return (($ipInt -band $mask) -eq ($netInt -band $mask))
+    return $true
 }
-function Is-IP-Allowed {
-    param ([string]$IP)
-
+# IP allowed check
+function Is-IPAllowed($IP) {
     foreach ($range in $AllowedIPRanges) {
-        if (IP-In-Range $IP $range) {
+        if (Test-Connection -Count 1 -Quiet -Destination $IP -ErrorAction SilentlyContinue) {
             return $true
         }
     }
     return $false
 }
-function Scan-Network {
+# Get active TCP/UDP connections
+function Get-ActiveConnections {
     $connections = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue
-    foreach ($conn in $connections) {
-        $remoteIP = $conn.RemoteAddress
-        $remotePort = $conn.RemotePort
-        $pid = $conn.OwningProcess
-        if (-not $remoteIP -or $remoteIP -eq "0.0.0.0") {
-            continue
-        }
-        $alertKeyConn = "conn:$remoteIP:$remotePort"
-        if (($AllowedPorts -notcontains $remotePort) -and (-not (Is-IP-Allowed $remoteIP))) {
-            if (-not (Rate-Limited $alertKeyConn)) {
-                Write-Log "ALERT" "Unusual outbound connection detected"
-                Write-Log "ALERT" "Destination: $remoteIP`:$remotePort"
-                Write-Log "ALERT" "PID: $pid"
-            }
-        }
-        else {
-            Write-Log "OK" "Allowed connection -> $remoteIP`:$remotePort"
-        }
-        if ($AllowedPorts -notcontains $remotePort) {
-            $alertKeyProc = "proc:$pid:$remotePort"
-            if (-not (Rate-Limited $alertKeyProc)) {
-                try {
-                    $proc = Get-Process -Id $pid -ErrorAction Stop
-                    Write-Log "ALERT" "Process using non-standard port"
-                    Write-Log "ALERT" "Process: $($proc.ProcessName) (PID $pid)"
-                    Write-Log "ALERT" "Port: $remotePort"
-                }
-                catch {
-                    Write-Log "ALERT" "Unknown process PID $pid using port $remotePort"
-                }
-            }
+    if ($connections) { return $connections } else { return @() }
+}
+# Process connections
+function Process-Connection($conn) {
+    $ip = $conn.RemoteAddress
+    $port = $conn.RemotePort
+    $proto = $conn.Protocol
+    if ($AllowedPorts -contains $port -or (Is-IPAllowed $ip)) { 
+        Write-Log "[OK] $proto -> $ip:$port" 
+    } else {
+        $key = "conn:$ip:$port:$proto"
+        if (-not (Is-RateLimited $key)) {
+            Write-Log "[ALERT] Unusual outbound connection" "WARN"
+            Write-Log "Protocol: $proto" "WARN"
+            Write-Log "Destination: $ip:$port" "WARN"
         }
     }
 }
-if (-not ([Security.Principal.WindowsPrincipal] `
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Must be run as Administrator."
-    exit 1
+# Run monitoring loop
+function Run-Monitor {
+    do {
+        if (-not (Check-DiskSpace)) { break }
+        $connections = Get-ActiveConnections
+        $jobs = @()
+        foreach ($conn in $connections) {
+            $jobs += Start-Job -ScriptBlock { param($c) Process-Connection $c } -ArgumentList $conn
+        }
+        $jobs | Wait-Job | Out-Null
+        $jobs | Remove-Job
+        if (-not $Continuous) { break }
+        Start-Sleep -Seconds 10
+    } while ($true)
 }
-Write-Log "INFO" "Network monitor started"
-if ($Continuous) {
-    while ($true) {
-        Scan-Network
-        Start-Sleep -Seconds $PollInterval
-    }
+# Main execution
+if (-not $Continuous -and -not $OneTime) {
+    Write-Host "Usage: .\NetworkMonitor.ps1 [-Continuous] [-OneTime] [-Terminal]"
+    exit
 }
-else {
-    Scan-Network
-    Write-Log "INFO" "One-time network scan completed"
-}
-<#
-One-time scan (log only)
-powershell -ExecutionPolicy Bypass -File damon.ps1
-Continuous mode
-powershell -ExecutionPolicy Bypass -File damon.ps1 -c
-Continuous + terminal output
-powershell -ExecutionPolicy Bypass -File damon.ps1 -c --terminal
-Log file location: C:\ProgramData\network_monitor.log
-#>
+Run-Monitor
