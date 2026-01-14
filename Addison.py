@@ -11,21 +11,41 @@ try:
     from cves import *
 except ModuleNotFoundError:
     print("Module not found! Downloading the required file...")
-    url = 'https://github.com/ZeroDayGang-gh05t5h311/Scanners/raw/main/CVES.py'
-    local_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues    
+    cves_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/CVES.py"
+    cves_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues    
     try:
-        # Send a GET request to download the file
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        # Save the file to disk
-        with open(local_filename, 'wb') as file:
+        response = requests.get(cves_url)
+        #response.raise_for_status()
+        with open(cves_filename, 'wb') as file:
             file.write(response.content)        
-        print(f"File downloaded successfully as '{local_filename}'.")
+        print("File downloaded successfully as '%s'."%(cves_filename))
         # Now try importing again
         from cves import *
     except requests.exceptions.RequestException as e:
         print(f"Error downloading the file: {e}")
-# -------- SAFE CALCUTOR -------- # 
+    except NameResolutionError:
+        print("Error downloading the file, you need to be connected to the internet.") 
+try:
+    from cves_asm import *
+except ModuleNotFoundError:
+    print("Module not found! Starting to download...")
+    cves_asm_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/CVES_ASM.py"
+    cves_asm_filename = 'cves_asm.py'
+    try:
+        response_asm = requests.get(cves_asm_url)
+        response_asm.raise_for_status()
+        with open(cves_asm_filename, 'wb') as file:
+            file.write(response_asm.content)        
+        print(f"File downloaded successfully as '%s'."%(cves_asm_filename))
+        from cves_asm import *
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading the file: {e}")
+    except NameResolutionError:
+        print(f"Error downloading the file, you need to be connected to the internet.") 
+try:
+    from cves_asm import *
+except ModuleNotFoundError:
+    print("Save a copy: 'https://github.com/ZeroDayGang-gh05t5h311/Scanners/blob/raw/main/CVES_ASM.py")
 class SafeCalc:
     OPS = {
         ast.Add: operator.add,
@@ -266,174 +286,7 @@ class tool:
                     except Exception as e:
                         sys.stderr.write(f"Error accessing {root}: {e}\n")
         print(f"[+] Directory map saved to {output_file}")
-    @staticmethod
-    def asm_scanner(mode, path):
-        """
-        mode: "--asm" (path is asm file) or "--bin" (path is binary file to objdump)
-        Returns a list of detected issue strings and also prints results (similar to C++ original).
-        """
-        # Prepare pattern groups (translated from C++)
-        def get_asm_vuln_patterns():
-            return [
-                {"name": "Buffer Overflow / Unsafe Memory Operations", "patterns": [
-                    re.compile(r"\bstrcpy\b", re.IGNORECASE),
-                    re.compile(r"\bstrncpy\b", re.IGNORECASE),
-                    re.compile(r"\bstrcat\b", re.IGNORECASE),
-                    re.compile(r"\bstrncat\b", re.IGNORECASE),
-                    re.compile(r"\bgets\b", re.IGNORECASE),
-                    re.compile(r"\bscanf\b", re.IGNORECASE),
-                    re.compile(r"\bfscanf\b", re.IGNORECASE),
-                    re.compile(r"\bsscanf\b", re.IGNORECASE),
-                    re.compile(r"\bmemcpy\b", re.IGNORECASE),
-                    re.compile(r"\bmemmove\b", re.IGNORECASE),
-                    re.compile(r"\bmovs\b", re.IGNORECASE),
-                    re.compile(r"\bstosb\b|\bstosd\b|\bstosw\b", re.IGNORECASE),
-                    re.compile(r"\bcmps\b", re.IGNORECASE),
-                    re.compile(r"\blods\b|lodsb|lodsw|lodsd", re.IGNORECASE),
-                    re.compile(r"\bxor\s+[a-z0-9]+,\s*\[.*\]", re.IGNORECASE),
-                    re.compile(r"\badd\s+[a-z0-9]+,\s*\[.*\]", re.IGNORECASE),
-                    re.compile(r"\bsub\s+[a-z0-9]+,\s*\[.*\]", re.IGNORECASE),
-                ]},
-                {"name": "Unsafe Function Call / Library Routines", "patterns": [
-                    re.compile(r"\bcall\s+strcpy\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+strncpy\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+strcat\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+strncat\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+gets\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+scanf\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+fscanf\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+sscanf\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+system\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+popen\b", re.IGNORECASE),
-                    re.compile(r"\bcall\s+execve\b", re.IGNORECASE),
-                ]},
-                {"name": "Hardcoded Secrets / Data Strings", "patterns": [
-                    re.compile(r"\bdb\s+\".*password.*\"", re.IGNORECASE),
-                    re.compile(r"\bdb\s+\".*secret.*\"", re.IGNORECASE),
-                    re.compile(r"\bdb\s+\".*key.*\"", re.IGNORECASE),
-                    re.compile(r"\bdb\s+\".*token.*\"", re.IGNORECASE),
-                    re.compile(r"\bdb\s+\".*credential.*\"", re.IGNORECASE),
-                    re.compile(r"\bdata\s+\".*password.*\"", re.IGNORECASE),
-                    re.compile(r"\bdata\s+\".*secret.*\"", re.IGNORECASE),
-                ]},
-                {"name": "Privilege / Permissions / Escalation Instructions", "patterns": [
-                    re.compile(r"\biopl\b", re.IGNORECASE),
-                    re.compile(r"\bitsl\b", re.IGNORECASE),
-                    re.compile(r"\bcli\b", re.IGNORECASE),
-                    re.compile(r"\bsti\b", re.IGNORECASE),
-                    re.compile(r"\bout\s+", re.IGNORECASE),
-                    re.compile(r"\bin\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x80\b.*\bsetuid\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x80\b.*\bsetgid\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x80\b.*\bchmod\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x80\b.*\bchown\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x80\b.*\brwx\b", re.IGNORECASE),
-                ]},
-                {"name": "Suspicious Syscalls / Interrupts", "patterns": [
-                    re.compile(r"\bint\s+0x80\b", re.IGNORECASE),
-                    re.compile(r"\bsyscall\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x2e\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x81\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x82\b", re.IGNORECASE),
-                    re.compile(r"\bint\s+0x90\b", re.IGNORECASE),
-                    re.compile(r"\btrap\b", re.IGNORECASE),
-                    re.compile(r"\beret\b", re.IGNORECASE),
-                ]},
-                {"name": "Control Flow / Return Oriented Programming (ROP) / Jump Gadgets", "patterns": [
-                    re.compile(r"\bjmp\s+[a-zA-Z0-9_]+\b", re.IGNORECASE),
-                    re.compile(r"\bjmp\s*\[.*\]", re.IGNORECASE),
-                    re.compile(r"\bcall\s*\[.*\]", re.IGNORECASE),
-                    re.compile(r"\bpush\s+[^\n]*; ret\b", re.IGNORECASE),
-                    re.compile(r"\bpop\s+[^\n]*; ret\b", re.IGNORECASE),
-                    re.compile(r"\bret\b", re.IGNORECASE),
-                    re.compile(r"\bleave\b", re.IGNORECASE),
-                ]},
-                {"name": "Format String / Debug / Info Leakage", "patterns": [
-                    re.compile(r"\bodbc\b|\bprintf\b|\bsprintf\b|\bvsprintf\b", re.IGNORECASE),
-                    re.compile(r"\bprintf\b", re.IGNORECASE),
-                    re.compile(r"\bsprintf\b", re.IGNORECASE),
-                    re.compile(r"\bvsprintf\b", re.IGNORECASE),
-                    re.compile(r"\bwprintf\b", re.IGNORECASE),
-                    re.compile(r"\bwprintf_s\b", re.IGNORECASE),
-                    re.compile(r"\bdebug\b", re.IGNORECASE),
-                    re.compile(r"\bprintk\b", re.IGNORECASE),
-                ]},
-                {"name": "Arithmetic / Overflow Risks", "patterns": [
-                    re.compile(r"\badd\b", re.IGNORECASE),
-                    re.compile(r"\bsub\b", re.IGNORECASE),
-                    re.compile(r"\bmul\b", re.IGNORECASE),
-                    re.compile(r"\bdiv\b", re.IGNORECASE),
-                    re.compile(r"\bimul\b", re.IGNORECASE),
-                    re.compile(r"\bdivl\b", re.IGNORECASE),
-                    re.compile(r"\bjo\b|\bjc\b|\bbe\b|\bja\b|\bjb\b|\bjl\b|\bjg\b", re.IGNORECASE),
-                ]},
-            ]
-        pattern_groups = get_asm_vuln_patterns()
-        # Exec objdump if requested
-        asm_text = ""
-        if mode == "--asm":
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    asm_text = fh.read()
-            except Exception as e:
-                print(f"Error opening asm file: {path}: {e}", file=sys.stderr)
-                return []
-        elif mode == "--bin":
-            try:
-                proc = subprocess.run(["objdump", "-d", path], capture_output=True, text=True, check=True)
-                asm_text = proc.stdout
-            except Exception as e:
-                print(f"Error running objdump on {path}: {e}", file=sys.stderr)
-                return []
-        else:
-            print("Unknown mode. Use --asm or --bin", file=sys.stderr)
-            return []
-        # Scan lines in parallel-ish: spawn worker per line (ThreadPool)
-        issues = []
-        seen_issues = set()
-        seen_lock = Lock()
-        lines = asm_text.splitlines()
-        # Worker function
-        def worker(line_index_line):
-            index, line = line_index_line
-            local = []
-            # Normalize line: collapse multiple spaces into single space
-            normalized_line = re.sub(r"\s+", " ", line)
-            for group in pattern_groups:
-                gname = group["name"]
-                for pat in group["patterns"]:
-                    try:
-                        if pat.search(normalized_line):
-                            identifier = f"{gname}:{index}:{normalized_line}"
-                            with seen_lock:
-                                if identifier in seen_issues:
-                                    matched = False
-                                else:
-                                    seen_issues.add(identifier)
-                                    matched = True
-                            if matched:
-                                local.append(f"[{gname}] {path}:{index}: {line}")
-                            # once matched by a pattern in the group, don't repeat same group for same line
-                            break
-                    except re.error:
-                        # skip invalid pattern (shouldn't happen)
-                        continue
-            return local
-        # Use ThreadPoolExecutor to parallelize checking
-        max_workers = min(32, (os.cpu_count() or 1) * 5)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = list(executor.map(worker, enumerate(lines, start=1)))
-            for fr in futures:
-                if fr:
-                    issues.extend(fr)
-        # Print results roughly like original
-        if not issues:
-            print(" No potential vulnerabilities found.\n")
-        else:
-            print(" Potential vulnerabilities detected:\n")
-            for issue in issues:
-                print(issue)
-        return issues
+    @staticmethod 
     def bg():
         DEFAULT_PORTS = {
             21: "ftp",
@@ -637,7 +490,10 @@ cmds = [
     "ascan: assembly scanner(.asm|binary files files).",
     "cves: static vulnerabilities scanner (JavaScript/BASH/C/C++/python) + hard-coded credentials etc.[Please give a directory to scan or it will exit]",
     "bg: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
-    "strcalc: calculates streaming service payouts(estimated).",]
+    "strcalc: calculates streaming service payouts(estimated).",
+    "cls: clears the screen.",
+    "cmd: runs a command",
+    "exit: exits.",]
 def icmd():
     print("Hi, welcome to the console. Type 'help' for options.")
     tmp = tool.getInput(False, "> ")
@@ -679,23 +535,33 @@ def icmd():
     elif tmp == "dirmap":
         tool.dirmap()
     elif tmp == "ascan":
-        mode = tool.getInput(False, "Mode (--asm or --bin):\n$: ").strip()
-        path = tool.getInput(False, "Path to file:\n$: ").strip() 
+        mode = tool.getInput(False, "Mode (--asm or --bin):\n$: ")
+        path = tool.getInput(False, "Path to file:\n$: ") 
         try:
-            tool.asm_scanner(mode, path)
+            tool.cmd("python3 cves_asm.py %s %s"%(mode,path))
         except Exception as e:
             print(f"Error running asm_scanner: {e}")
         return " "
     elif tmp == "cves":
+        dirname = tool.getInput(False,"Directory name to scan: ")
         try:
-            cves()
+            tool.cmd("python3 cves.py %s"%(dirname))
         except Exception as e:
             print("Really don't know what happened there: I should not print.")
     elif tmp == "bg":
         tool.runbg()
     elif tmp == "strcalc":
         tool.strcalc()
+    elif tmp == "cls":
+        if sys.platform == "linux":
+            tool.cmd("clear")
+        else:
+            tool.cmd("cls")
+    #not even multiplatform with windows yet but will include OS X as well too so all this works on all three.
+    elif tmp == "cmd":
+        tool.cmd("%s"%(tool.getInput(False,"CMD: ")))
     elif tmp == "exit":
+        tool.cmd('rm -rf "__pycache__"')
         exit()
 # -------- MAIN LOOP -------- #
 tmp = "" #key part to the loop so it keeps running 
