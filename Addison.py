@@ -42,10 +42,6 @@ except ModuleNotFoundError:
         print(f"Error downloading the file: {e}")
     except NameResolutionError:
         print(f"Error downloading the file, you need to be connected to the internet.") 
-try:
-    from cves_asm import *
-except ModuleNotFoundError:
-    print("Save a copy: 'https://github.com/ZeroDayGang-gh05t5h311/Scanners/blob/raw/main/CVES_ASM.py")
 class SafeCalc:
     OPS = {
         ast.Add: operator.add,
@@ -81,7 +77,6 @@ class SafeCalc:
                 raise ValueError("Only numbers allowed")
         else:
             raise TypeError(f"Unsupported expression: {ast.dump(node)}")
-# -------- MAIN TOOL CLASS -------- #
 class tool:
     @staticmethod
     def getInput(ios, arg):
@@ -90,18 +85,11 @@ class tool:
         else:
             return input(f"{arg}")  # Return as string
     @staticmethod
-    def cmd(args, capture=False):
-        """Run a system command safely with subprocess."""
+    def cmd(args):
         try:
-            if isinstance(args, str):
-                args = args.split()
-            if capture:
-                result = subprocess.run(args, capture_output=True, text=True, check=True)
-                return result.stdout
-            else:
-                subprocess.run(args, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] Command failed: {e}")
+            os.system("%s"%(arg))
+        except:
+            print("test")
     @staticmethod
     def mdir():
         dname = tool.getInput(False, "Directory name please: ")
@@ -321,7 +309,7 @@ class tool:
         def probe_tcp_banner(host: str, port: int, timeout: float) -> Dict[str, Any]:
             """
             Attempt to connect to host:port and grab a banner / headers depending on service.
-            Returns a dict describing findings.
+            Returns a dict describing findings. (experimental)
             """
             out = {
             "host": host,
