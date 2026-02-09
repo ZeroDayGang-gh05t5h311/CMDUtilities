@@ -27,7 +27,6 @@ public:
         getline(cin, s);
         return s;
     }
-
     static int integer(const string& p) {
         try {
             return stoi(str(p));
@@ -112,7 +111,6 @@ class Calculator {
             }
         }
     };
-
 public:
     static bool eval(const string& e, double& out) {
         try {
@@ -171,7 +169,6 @@ public:
     static void netstat() {
         cout << Command::capture({"netstat","-an"});
     }
-
     static void ping() {
         string h = Input::str("Host: ");
         if(!Input::safe(h)){ cerr<<"[ERROR]\n"; return; }
@@ -238,7 +235,6 @@ public:
         cout << Command::capture({"ps","aux"});
 #endif
     }
-
     static void killproc() {
         string pid = Input::str("PID: ");
         if(!Input::safe(pid)){ cerr<<"[ERROR]\n"; return; }
@@ -268,12 +264,18 @@ private:
         }
     }
 };
-int main() {
-    while(true){
-        cout<<"\n--- MENU ---\n";
+static void helpmenu() {
+          cout<<"\n--- MENU ---\n";
         cout<<"1) Calculator\n2) Make dir\n3) File ops\n4) XOR encrypt\n5) Netstat\n6) Ping\n7) CPU\n8) Hash\n";
-        cout<<"9) Compress\n10 Extract\n11 Backup\n12 Large files\n13 Cleanup\n14 Memory\n15 Processes\n";
-        cout<<"16 Kill process\n17 dirmap\n0 Exit\n";
+        cout<<"9) Compress\n10) Extract\n11) Backup\n12) Large files\n13) Cleanup\n14) Memory\n15) Processes\n";
+        cout<<"16) Kill process\n17) dirmap\n18) help(this text)\n0 Exit\n";
+}
+int main() {
+     cout<<"\n--- MENU ---\n";
+        cout<<"1) Calculator\n2) Make dir\n3) File ops\n4) XOR encrypt\n5) Netstat\n6) Ping\n7) CPU\n8) Hash\n";
+        cout<<"9) Compress\n10) Extract\n11) Backup\n12) Large files\n13) Cleanup\n14) Memory\n15) Processes\n";
+        cout<<"16) Kill process\n17) dirmap\n18) help(this text)\n0 Exit\n";
+    while(true){
         switch(Input::integer("Choice: ")) {
             case 1:{ double r; if(Calculator::eval(Input::str("Expr: "),r)) cout<<r<<"\n"; } break;
             case 2: FileOps::mkdir(); break;
@@ -298,7 +300,8 @@ int main() {
             case 15: SystemOps::processes(); break;
             case 16: SystemOps::killproc(); break;
             case 17: DirectoryMap::run(); break;
-            case 0: return 0;
+            case 18: helpmenu(); break;
+            case 0: cout << "Not an option: exiting!" << return 0;
         }
     }
-}
+}; 
