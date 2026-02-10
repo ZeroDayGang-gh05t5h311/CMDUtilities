@@ -69,7 +69,7 @@ public:
     }
     static void run(const vector<string>& args) {
         capture(args);
-    }
+    };
 };
 class Calculator {
     struct Parser {
@@ -261,8 +261,8 @@ private:
                 walk(e.path(), f, d+1);
             else
                 f << string(d*2+2,' ') << e.path().filename().string() << "\n";
-        }
-    }
+        };
+    };
 };
 static void helpmenu() {
           cout<<"\n--- MENU ---\n";
@@ -279,7 +279,7 @@ int main() {
         switch(Input::integer("Choice: ")) {
             case 1:{ double r; if(Calculator::eval(Input::str("Expr: "),r)) cout<<r<<"\n"; } break;
             case 2: FileOps::mkdir(); break;
-            case 3:{
+            case 3: {
                 int o=Input::integer("1 Read 2 Write 3 Append 4 Search: ");
                 if(o==1) FileOps::read();
                 else if(o==2) FileOps::write(false);
@@ -301,7 +301,7 @@ int main() {
             case 16: SystemOps::killproc(); break;
             case 17: DirectoryMap::run(); break;
             case 18: helpmenu(); break;
-            case 0: cout << "Not an option: exiting!" << return 0;
+            case 0: cout << "Not an option: exiting!"; return 0; 
         }
     }
-}; 
+}; //g++ Charli.cpp 
