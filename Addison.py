@@ -87,7 +87,7 @@ class tool:
     @staticmethod
     def cmd(args):
         try:
-            os.system("%s"%(arg))
+            os.system("%s"%(arg)) #This is not safe and will cause problems if implemeted in other ways.
         except:
             print("test")
     @staticmethod
