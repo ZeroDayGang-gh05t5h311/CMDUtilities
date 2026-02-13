@@ -21,22 +21,22 @@ namespace fs = std::filesystem;
 using namespace std;
 class Input {
 public:
-    static string str(const string& p) {
-        cout << p;
-        string s;
-        getline(cin, s);
-        return s;
+    static string str(const string& prompt) {
+        cout << prompt;
+        string input;
+        getline(cin, input);
+        return input;
     }
-    static int integer(const string& p) {
+    static int integer(const string& prompt) {
         try {
-            return stoi(str(p));
+            return stoi(str(prompt));
         } catch (...) {
             return 0;
         }
     }
-    static bool safe(const string& s) {
-        for (char c : s)
-            if (!(isalnum((unsigned char)c) || c=='/' || c=='_' || c=='.' || c=='-' || c==':'))
+    static bool safe(const string& str) {
+        for (char c : str)
+            if (!(isalnum((unsigned char)c) || c == '/' || c == '_' || c == '.' || c == '-' || c == ':'))
                 return false;
         return true;
     }
@@ -49,9 +49,8 @@ public:
             if (!Input::safe(a)) throw runtime_error("Unsafe argument");
             cmd += a + " ";
         }
-        array<char,1024> buf{};
+        array<char, 1024> buf{};
         string out;
-
 #if OS_WIN
         FILE* fp = _popen(cmd.c_str(), "r");
 #else
@@ -69,52 +68,68 @@ public:
     }
     static void run(const vector<string>& args) {
         capture(args);
-    };
+    }
 };
 class Calculator {
     struct Parser {
-        string s; size_t i{0};
-        void ws(){ while(i<s.size() && isspace((unsigned char)s[i])) ++i; }
-        bool match(char c){ ws(); if(i<s.size() && s[i]==c){++i; return true;} return false; }
-        double number(){
-            ws(); size_t j=i;
-            if(i<s.size() && (s[i]=='+'||s[i]=='-')) ++i;
-            while(i<s.size() && (isdigit((unsigned char)s[i])||s[i]=='.')) ++i;
-            if(j==i) throw runtime_error("num");
-            return stod(s.substr(j,i-j));
+        string s;
+        size_t i{0};
+        void ws() {
+            while (i < s.size() && isspace((unsigned char)s[i])) ++i;
         }
-        double factor(){
-            if(match('+')) return factor();
-            if(match('-')) return -factor();
-            if(match('(')){ double v=expr(); if(!match(')')) throw runtime_error(")"); return v; }
+        bool match(char c) {
+            ws();
+            if (i < s.size() && s[i] == c) {
+                ++i;
+                return true;
+            }
+            return false;
+        }
+        double number() {
+            ws();
+            size_t j = i;
+            if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
+            while (i < s.size() && (isdigit((unsigned char)s[i]) || s[i] == '.')) ++i;
+            if (j == i) throw runtime_error("num");
+            return stod(s.substr(j, i - j));
+        }
+        double factor() {
+            if (match('+')) return factor();
+            if (match('-')) return -factor();
+            if (match('(')) {
+                double v = expr();
+                if (!match(')')) throw runtime_error(")");
+                return v;
+            }
             return number();
         }
-        double power(){
-            double v=factor();
-            if(match('^')) v=pow(v,power());
+        double power() {
+            double v = factor();
+            if (match('^')) v = pow(v, power());
             return v;
         }
-        double term(){
-            double v=power();
-            while(true){
-                if(match('*')) v*=power();
-                else if(match('/')) v/=power();
+        double term() {
+            double v = power();
+            while (true) {
+                if (match('*')) v *= power();
+                else if (match('/')) v /= power();
                 else return v;
             }
         }
-        double expr(){
-            double v=term();
-            while(true){
-                if(match('+')) v+=term();
-                else if(match('-')) v-=term();
+        double expr() {
+            double v = term();
+            while (true) {
+                if (match('+')) v += term();
+                else if (match('-')) v -= term();
                 else return v;
             }
         }
     };
+
 public:
-    static bool eval(const string& e, double& out) {
+    static bool eval(const string& expr, double& out) {
         try {
-            Parser p{e,0};
+            Parser p{ expr, 0 };
             out = p.expr();
             p.ws();
             return p.i == p.s.size();
@@ -129,37 +144,53 @@ public:
         fs::create_directories(Input::str("Directory name: "));
         cout << "[INFO] Directory created\n";
     }
-
     static void read() {
         ifstream f(Input::str("File: "));
-        if(!f){ cerr<<"[ERROR] Open failed\n"; return; }
+        if (!f) {
+            cerr << "[ERROR] Open failed\n";
+            return;
+        }
         cout << f.rdbuf();
     }
-    static void write(bool append=false) {
-        string f = Input::str("File: ");
-        string t = Input::str("Text: ");
-        ofstream o(f, append ? ios::app : ios::trunc);
-        if(!o){ cerr<<"[ERROR] Write failed\n"; return; }
-        o << t;
+    static void write(bool append = false) {
+        string file = Input::str("File: ");
+        string text = Input::str("Text: ");
+        ofstream out(file, append ? ios::app : ios::trunc);
+        if (!out) {
+            cerr << "[ERROR] Write failed\n";
+            return;
+        }
+        out << text;
     }
     static void search() {
         ifstream f(Input::str("File: "));
-        if(!f){ cerr<<"[ERROR]\n"; return; }
+        if (!f) {
+            cerr << "[ERROR]\n";
+            return;
+        }
         string term = Input::str("Term: "), line;
-        while(getline(f,line))
-            if(line.find(term)!=string::npos)
-                cout<<line<<"\n";
+        while (getline(f, line)) {
+            if (line.find(term) != string::npos)
+                cout << line << "\n";
+        }
     }
     static void xor_encrypt() {
-        string f = Input::str("File: ");
-        string k = Input::str("Key: ");
-        if(k.empty()){ cerr<<"[ERROR] Empty key\n"; return; }
-        ifstream in(f, ios::binary);
-        ofstream out("encrypted_"+f, ios::binary);
-        if(!in||!out){ cerr<<"[ERROR] File error\n"; return; }
-        char c; size_t i=0;
-        while(in.get(c)){
-            c ^= k[i++ % k.size()];
+        string file = Input::str("File: ");
+        string key = Input::str("Key: ");
+        if (key.empty()) {
+            cerr << "[ERROR] Empty key\n";
+            return;
+        }
+        ifstream in(file, ios::binary);
+        ofstream out("encrypted_" + file, ios::binary);
+        if (!in || !out) {
+            cerr << "[ERROR] File error\n";
+            return;
+        }
+        char c;
+        size_t i = 0;
+        while (in.get(c)) {
+            c ^= key[i++ % key.size()];
             out.put(c);
         }
     }
@@ -167,81 +198,87 @@ public:
 class SystemOps {
 public:
     static void netstat() {
-        cout << Command::capture({"netstat","-an"});
+        cout << Command::capture({ "netstat", "-an" });
     }
     static void ping() {
-        string h = Input::str("Host: ");
-        if(!Input::safe(h)){ cerr<<"[ERROR]\n"; return; }
+        string host = Input::str("Host: ");
+        if (!Input::safe(host)) {
+            cerr << "[ERROR]\n";
+            return;
+        }
 #if OS_WIN
-        cout << Command::capture({"ping","-n","4",h});
+        cout << Command::capture({ "ping", "-n", "4", host });
 #else
-        cout << Command::capture({"ping","-c","4",h});
+        cout << Command::capture({ "ping", "-c", "4", host });
 #endif
     }
     static void cpu() {
 #if OS_WIN
-        cout << Command::capture({"wmic","cpu","get","name"});
+        cout << Command::capture({ "wmic", "cpu", "get", "name" });
 #else
-        cout << Command::capture({"lscpu"});
+        cout << Command::capture({ "lscpu" });
 #endif
     }
     static void hash() {
-        string f = Input::str("File: ");
+        string file = Input::str("File: ");
 #if OS_WIN
-        cout << Command::capture({"certutil","-hashfile",f,"SHA256"});
+        cout << Command::capture({ "certutil", "-hashfile", file, "SHA256" });
 #else
-        cout << Command::capture({"sha256sum",f});
+        cout << Command::capture({ "sha256sum", file });
 #endif
     }
     static void compress() {
-        Command::run({"tar","-czf","out.tar.gz",Input::str("Target: ")});
+        Command::run({ "tar", "-czf", "out.tar.gz", Input::str("Target: ") });
     }
-
     static void extract() {
-        Command::run({"tar","-xzf",Input::str("Archive: ")});
+        Command::run({ "tar", "-xzf", Input::str("Archive: ") });
     }
     static void backup() {
 #if OS_WIN
-        Command::run({"xcopy",Input::str("Src: "),Input::str("Dst: "),"/E","/I","/Y"});
+        Command::run({ "xcopy", Input::str("Src: "), Input::str("Dst: "), "/E", "/I", "/Y" });
 #else
-        Command::run({"rsync","-a",Input::str("Src: ")+"/",Input::str("Dst: ")+"/"});
+        Command::run({ "rsync", "-a", Input::str("Src: ") + "/", Input::str("Dst: ") + "/" });
 #endif
     }
     static void largefiles() {
         cout << Command::capture({
             "find",
             Input::str("Dir: "),
-            "-type","f","-size","+"+to_string(Input::integer("KB: "))+"k"
+            "-type", "f", "-size", "+" + to_string(Input::integer("KB: ")) + "k"
         });
     }
     static void cleanup() {
 #if OS_WIN
-        Command::run({"cmd","/c","del","/q","/f","/s","%TEMP%\\*"});
+        Command::run({ "cmd", "/c", "del", "/q", "/f", "/s", "%TEMP%\\*" });
 #else
-        Command::run({"rm","-rf","/tmp/*"});
+        Command::run({ "rm", "-rf", "/tmp/*" });
 #endif
     }
     static void meminfo() {
 #if OS_WIN
-        cout << Command::capture({"wmic","OS","get","FreePhysicalMemory,TotalVisibleMemorySize"});
+        cout << Command::capture({ "wmic", "OS", "get", "FreePhysicalMemory,TotalVisibleMemorySize" });
 #else
-        cout << Command::capture({"free","-h"});
+        cout << Command::capture({ "free", "-h" });
 #endif
     }
     static void processes() {
 #if OS_WIN
-        cout << Command::capture({"tasklist"});
+        cout << Command::capture({ "tasklist" });
 #else
-        cout << Command::capture({"ps","aux"});
+        cout << Command::capture({ "ps", "aux" });
 #endif
     }
     static void killproc() {
         string pid = Input::str("PID: ");
-        if(!Input::safe(pid)){ cerr<<"[ERROR]\n"; return; }
+        if (!Input::safe(pid)) {
+            cerr << "[ERROR]\n";
+            return;
+        }
+
 #if OS_WIN
-        Command::run({"taskkill","/PID",pid,"/F"});
+        Command::run({ "taskkill", "/PID", pid, "/F" });
 #else
-        Command::run({"kill","-9",pid});
+        Command::run({ "kill", "-9", pid });
 #endif
     }
 };
@@ -249,42 +286,49 @@ class DirectoryMap {
 public:
     static void run() {
         ofstream f("directory_map.txt");
-        if(!f){ cerr<<"[ERROR]\n"; return; }
+        if (!f) {
+            cerr << "[ERROR]\n";
+            return;
+        }
         walk(fs::current_path(), f, 0);
-        cout<<"[INFO] Directory map saved\n";
+        cout << "[INFO] Directory map saved\n";
     }
 private:
-    static void walk(const fs::path& p, ofstream& f, int d) {
-        f << string(d*2,' ') << p.filename().string() << "/\n";
-        for(auto& e: fs::directory_iterator(p, fs::directory_options::skip_permission_denied)){
-            if(e.is_directory())
-                walk(e.path(), f, d+1);
+    static void walk(const fs::path& p, ofstream& f, int depth) {
+        f << string(depth * 2, ' ') << p.filename().string() << "/\n";
+        for (auto& entry : fs::directory_iterator(p, fs::directory_options::skip_permission_denied)) {
+            if (entry.is_directory())
+                walk(entry.path(), f, depth + 1);
             else
-                f << string(d*2+2,' ') << e.path().filename().string() << "\n";
-        };
-    };
+                f << string(depth * 2 + 2, ' ') << entry.path().filename().string() << "\n";
+        }
+    }
 };
 static void helpmenu() {
-          cout<<"\n--- MENU ---\n";
-        cout<<"1) Calculator\n2) Make dir\n3) File ops\n4) XOR encrypt\n5) Netstat\n6) Ping\n7) CPU\n8) Hash\n";
-        cout<<"9) Compress\n10) Extract\n11) Backup\n12) Large files\n13) Cleanup\n14) Memory\n15) Processes\n";
-        cout<<"16) Kill process\n17) dirmap\n18) help(this text)\n0 Exit\n";
+    cout << "\n--- MENU ---\n";
+    cout << "1) Calculator\n2) Make dir\n3) File ops\n4) XOR encrypt\n5) Netstat\n6) Ping\n7) CPU\n8) Hash\n";
+    cout << "9) Compress\n10) Extract\n11) Backup\n12) Large files\n13) Cleanup\n14) Memory\n15) Processes\n";
+    cout << "16) Kill process\n17) dirmap\n18) help(this text)\n0 Exit\n";
 }
 int main() {
-     cout<<"\n--- MENU ---\n";
-        cout<<"1) Calculator\n2) Make dir\n3) File ops\n4) XOR encrypt\n5) Netstat\n6) Ping\n7) CPU\n8) Hash\n";
-        cout<<"9) Compress\n10) Extract\n11) Backup\n12) Large files\n13) Cleanup\n14) Memory\n15) Processes\n";
-        cout<<"16) Kill process\n17) dirmap\n18) help(this text)\n0 Exit\n";
-    while(true){
-        switch(Input::integer("Choice: ")) {
-            case 1:{ double r; if(Calculator::eval(Input::str("Expr: "),r)) cout<<r<<"\n"; } break;
+    cout << "\n--- MENU ---\n";
+    cout << "1) Calculator\n2) Make dir\n3) File ops\n4) XOR encrypt\n5) Netstat\n6) Ping\n7) CPU\n8) Hash\n";
+    cout << "9) Compress\n10) Extract\n11) Backup\n12) Large files\n13) Cleanup\n14) Memory\n15) Processes\n";
+    cout << "16) Kill process\n17) dirmap\n18) help(this text)\n0 Exit\n";
+    while (true) {
+        switch (Input::integer("Choice: ")) {
+            case 1: {
+                double result;
+                if (Calculator::eval(Input::str("Expr: "), result))
+                    cout << result << "\n";
+            } break;
             case 2: FileOps::mkdir(); break;
             case 3: {
-                int o=Input::integer("1 Read 2 Write 3 Append 4 Search: ");
-                if(o==1) FileOps::read();
-                else if(o==2) FileOps::write(false);
-                else if(o==3) FileOps::write(true);
-                else if(o==4) FileOps::search();
+                int option = Input::integer("1 Read 2 Write 3 Append 4 Search: ");
+                if (option == 1) FileOps::read();
+                else if (option == 2) FileOps::write(false);
+                else if (option == 3) FileOps::write(true);
+                else if (option == 4) FileOps::search();
             } break;
             case 4: FileOps::xor_encrypt(); break;
             case 5: SystemOps::netstat(); break;
@@ -301,7 +345,7 @@ int main() {
             case 16: SystemOps::killproc(); break;
             case 17: DirectoryMap::run(); break;
             case 18: helpmenu(); break;
-            case 0: cout << "Not an option: exiting!"; return 0; 
+            case 0: cout << "Not an option: exiting!\n"; return 0;
         }
     }
-}; //g++ Charli.cpp 
+}
