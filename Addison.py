@@ -10,9 +10,12 @@ import requests,urllib3
 try:
     from cves import *
 except ModuleNotFoundError:
-    print("Module not found! Downloading the required file...")
-    cves_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/CVES.py"
-    cves_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues    
+    try:    
+        print("Module not found! Downloading the required file...")
+        cves_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/CVES.py"
+        cves_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues
+    except HTTPSConnectionPool:
+        print("Oh you need to be on the internet to get this module...failed to get cves.")   
     try:
         response = requests.get(cves_url)
         #response.raise_for_status()
@@ -41,7 +44,23 @@ except ModuleNotFoundError:
     except requests.exceptions.RequestException as e:
         print(f"Error downloading the file: {e}")
     except NameResolutionError:
-        print(f"Error downloading the file, you need to be connected to the internet.") 
+        print(f"Error downloading the file, you need to be connected to the internet.")
+try:
+    from sila import *
+except ModuleNotFoundError:
+    print("Not found the sila module! Downloading...")
+    try:
+        sila_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/Sila.py"
+        responce_sila = requests.get(sila_url)
+        responce_sila.raise_for_status()
+        silafilename = "sila.py"
+        with open(silafilename, "wb") as file:
+            file.write(response_sila.content)
+        print("Downloaded successfully as %s."%(silafilename))
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading the file: {e}")
+    except NameResolutionError:
+        print(f"Error downloading the file, you need to be connected to the internet.")
 class SafeCalc:
     OPS = {
         ast.Add: operator.add,
@@ -85,11 +104,18 @@ class tool:
         else:
             return input(f"{arg}")  # Return as string
     @staticmethod
-    def cmd(args):
+    def cmd(args, capture=False):
+        """Run a system command safely with subprocess."""
         try:
-            os.system("%s"%(arg)) #This is not safe and will cause problems if implemeted in other ways.
-        except:
-            print("test")
+            if isinstance(args, str):
+                args = args.split()
+            if capture:
+                result = subprocess.run(args, capture_output=True, text=True, check=True)
+                return result.stdout
+            else:
+                subprocess.run(args, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Command failed: {e}")
     @staticmethod
     def mdir():
         dname = tool.getInput(False, "Directory name please: ")
@@ -274,163 +300,7 @@ class tool:
                     except Exception as e:
                         sys.stderr.write(f"Error accessing {root}: {e}\n")
         print(f"[+] Directory map saved to {output_file}")
-    @staticmethod 
-    def bg():
-        DEFAULT_PORTS = {
-            21: "ftp",
-            22: "ssh",
-            23: "telnet",
-            25: "smtp",
-            80: "http",
-        }
-        # How many bytes to attempt to read from a banner
-        BANNER_READ_BYTES = 4096
-        def recv_all(sock: socket.socket, timeout: float, max_bytes: int = BANNER_READ_BYTES) -> bytes:
-            """
-            Read whatever banner is available up to max_bytes. Non-blocking reads with a timeout.
-            """
-            sock.settimeout(timeout)
-            data = bytearray()
-            try:
-            # try a single recv, then try reading until timeout
-                while len(data) < max_bytes:
-                    chunk = sock.recv(min(2048, max_bytes - len(data)))
-                    if not chunk:
-                        break
-                    data.extend(chunk)
-            # if what we got looks like complete headers (http), we can break early
-                    if b"\r\n\r\n" in data:
-                        break
-            except socket.timeout:
-                pass
-            except Exception:
-                pass
-            return bytes(data)
-        def probe_tcp_banner(host: str, port: int, timeout: float) -> Dict[str, Any]:
-            """
-            Attempt to connect to host:port and grab a banner / headers depending on service.
-            Returns a dict describing findings. (experimental)
-            """
-            out = {
-            "host": host,
-            "port": port,
-            "service_guess": DEFAULT_PORTS.get(port, "tcp"),
-            "reachable": False,
-            "banner": None,
-            "http_headers": None,
-            "notes": [],
-            "duration_s": None,
-            }
-            start = time.time()
-            try:
-                with socket.create_connection((host, port), timeout=timeout) as sock:
-                    out["reachable"] = True
-                    proto = DEFAULT_PORTS.get(port, "")
-                    # For HTTP port: send a HEAD request to obtain headers.
-                if port == 80:
-                    try:
-                        req = f"HEAD / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: banner-scanner/1.0\r\n\r\n"
-                        sock.sendall(req.encode("utf-8"))
-                        data = recv_all(sock, timeout)
-                        text = data.decode("latin-1", errors="replace")
-                        out["banner"] = (text[:BANNER_READ_BYTES]).strip()
-                        # parse headers (very simple)
-                        headers = {}
-                        lines = text.splitlines()
-                        if lines:
-                            headers["status_line"] = lines[0]
-                            for ln in lines[1:]:
-                                if ":" in ln:
-                                    k,v = ln.split(":",1)
-                                    headers[k.strip()] = v.strip()
-                        out["http_headers"] = headers
-                    except Exception as e:
-                        out["notes"].append(f"HTTP probe error: {e}")
-                        # fallback to banner read
-                        data = recv_all(sock, timeout)
-                        out["banner"] = data.decode("latin-1", errors="replace").strip()
-                # For SMTP and FTP and SSH the server often sends an initial banner/greeting.
-                elif port in (21, 25, 22):
-                    # For SMTP (25) and FTP (21) and SSH (22) server usually sends greeting on connect.
-                    data = recv_all(sock, timeout)
-                    text = data.decode("latin-1", errors="replace").strip()
-                    out["banner"] = text
-                # For SMTP we might optionally send nothing; keep safe and do not send commands.
-                # For SSH, the server typically sends a version string like "SSH-2.0-OpenSSH_8.4"
-                elif port == 23:  # telnet - often no banner; attempt read only
-                    data = recv_all(sock, timeout)
-                    out["banner"] = data.decode("latin-1", errors="replace").strip()
-                else:
-                    # Generic attempt: try to read banner, don't send data
-                    data = recv_all(sock, timeout)
-                    out["banner"] = data.decode("latin-1", errors="replace").strip()
-            except (socket.timeout, ConnectionRefusedError) as e:
-                out["notes"].append(f"unreachable: {repr(e)}")
-            except Exception as e:
-                out["notes"].append(f"error: {repr(e)}")
-            out["duration_s"] = round(time.time() - start, 3)
-            return out
-        def worker(q: queue.Queue, results: list, timeout: float):
-            while True:
-                try:
-                    host, port = q.get_nowait()
-                except queue.Empty:
-                    return
-            res = probe_tcp_banner(host, port, timeout)
-            results.append(res)
-            q.task_done()
-        def scan_host(host: str, ports: Dict[int,str], timeout: float = 3.0, threads: int = 8):
-            q = queue.Queue()
-            results = []
-            for p in ports:
-                q.put((host, p))
-            worker_threads = []
-            for _ in range(min(threads, q.qsize())):
-                t = threading.Thread(target=worker, args=(q, results, timeout), daemon=True)
-                t.start()
-                worker_threads.append(t)
-            q.join()
-            # threads are daemon; they will exit
-            # sort results by port for consistent output
-            results.sort(key=lambda r: r.get("port", 0))
-            return results
-    def runbg():
-        parser = argparse.ArgumentParser(description="Simple ethical banner scanner for common services.")
-        parser.add_argument("target", help="Target host or IP (must be authorized to test)")
-        parser.add_argument("--timeout", "-t", type=float, default=3.0, help="Socket timeout seconds (default 3.0)")
-        parser.add_argument("--threads", "-T", type=int, default=8, help="Number of concurrent threads (default 8)")
-        parser.add_argument("--json", "-j", metavar="FILE", help="Write results as JSON to FILE")
-        args = parser.parse_args()
-        host = args.target
-        timeout = args.timeout
-        threads = args.threads
-        print(f"[+] Ethical banner scanner - targeting {host}")
-        print("[+] Ports:", ", ".join(f"{p}/{DEFAULT_PORTS[p]}" for p in DEFAULT_PORTS))
-        print(f"[+] Timeout={timeout}s   Threads={threads}")
-        print("Only run this against systems you own or have permission to test.\n")
-        results = scan_host(host, list(DEFAULT_PORTS.keys()), timeout=timeout, threads=threads)
-    # Display nicely
-        for r in results:
-            print("="*60)
-            print(f"Host: {r['host']}  Port: {r['port']}  Service-guess: {r['service_guess']}")
-            print(f"Reachable: {r['reachable']}  Duration: {r['duration_s']}s")
-            if r.get("banner"):
-                print("Banner / Response snippet:")
-                print(r["banner"][:1000])  # print up to 1000 chars
-            if r.get("http_headers"):
-                print("HTTP headers (parsed):")
-            for k,v in r["http_headers"].items():
-                print(f"  {k}: {v}")
-            if r.get("notes"):
-                print("Notes:", "; ".join(r["notes"]))
-        print("="*60)
-        if args.json:
-            try:
-                with open(args.json, "w", encoding="utf-8") as f:
-                    json.dump(results, f, indent=2, ensure_ascii=False)
-                print(f"[+] Results written to {args.json}")
-            except Exception as e:
-                print(f"[!] Failed to write JSON: {e}")
+    @staticmethod
     def strcalc():
         Spotify_High = 0.005
         Spotify_Low = 0.003
@@ -477,7 +347,7 @@ cmds = [
     "dirmap: maps a directory tree of the whole filesystem and put's it in a file(code not implemented).",
     "ascan: assembly scanner(.asm|binary files files).",
     "cves: static vulnerabilities scanner (JavaScript/BASH/C/C++/python) + hard-coded credentials etc.[Please give a directory to scan or it will exit]",
-    "bg: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
+    "sila: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
     "strcalc: calculates streaming service payouts(estimated).",
     "cls: clears the screen.",
     "cmd: runs a command",
@@ -524,20 +394,28 @@ def icmd():
         tool.dirmap()
     elif tmp == "ascan":
         mode = tool.getInput(False, "Mode (--asm or --bin):\n$: ")
-        path = tool.getInput(False, "Path to file:\n$: ") 
+        path = tool.getInput(False, "Path to file:\n$: ")
+        ver = "--verbose"
+        log = "--log outputlog.txt"
         try:
-            tool.cmd("python3 cves_asm.py %s %s"%(mode,path))
+            tool.cmd("python3 cves_asm.py %s %s %s %s"%(mode,path,ver,log))
         except Exception as e:
             print(f"Error running asm_scanner: {e}")
-        return " "
     elif tmp == "cves":
         dirname = tool.getInput(False,"Directory name to scan: ")
         try:
             tool.cmd("python3 cves.py %s"%(dirname))
         except Exception as e:
-            print("Really don't know what happened there: I should not print.")
-    elif tmp == "bg":
-        tool.runbg()
+            pass
+    elif tmp == "sila":
+        target = tool.getInput(False, "Target host: \n$: ")
+        outputname = tool.getInput(False,"Output file name:\n$: ")
+        """
+        jsonext = "--json "+outputname+".json"
+        htmlext = "--html "+outputname+".html"
+        csvext =  "--csv "+outputname+".csv"
+        """
+        tool.cmd("python3 sila.py %s --verbose --json %s"%(target,outputname))
     elif tmp == "strcalc":
         tool.strcalc()
     elif tmp == "cls":
@@ -545,13 +423,21 @@ def icmd():
             tool.cmd("clear")
         else:
             tool.cmd("cls")
-    #not even multiplatform with windows yet but will include OS X as well too so all this works on all three.
     elif tmp == "cmd":
         tool.cmd("%s"%(tool.getInput(False,"CMD: ")))
     elif tmp == "exit":
-        tool.cmd('rm -rf "__pycache__"')
+        tool.cmd(["rm -rf '__pycache__'"], capture=True)
         exit()
-# -------- MAIN LOOP -------- #
-tmp = "" #key part to the loop so it keeps running 
-while tmp != "exit": #unless you type 'exit'
-    tmp = icmd() #surprisingly efficient
+tmp = "" 
+try: 
+    while tmp != "exit": 
+        tmp = icmd() #surprisingly efficient
+except Exception:
+    tool.cmd(["rm -rf '__pycache__'"], capture=True);exit()
+finally:
+    try:
+        tool.cmd(["rm -rf '__pycache__'"], capture=True)
+    except FileNotFoundError:
+        print("No cache to remove")
+    finally:
+        print("See you again.")
