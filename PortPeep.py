@@ -6,189 +6,236 @@ import ipaddress
 import os
 import time
 import argparse
+import json
+import csv
 from logging.handlers import RotatingFileHandler
-import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import multiprocessing  # For dynamic CPU-based thread pool
-RATE_LIMIT_SECONDS = 60  # alert cooldown
-DISK_SPACE_THRESHOLD = 1 * 1024 * 1024 * 1024  # 1 GB threshold for disk space
-MAX_WORKERS = max(2, multiprocessing.cpu_count() * 2)  # Dynamic: 2 threads per CPU core, minimum 2
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+RATE_LIMIT_SECONDS = 60
+DISK_SPACE_THRESHOLD = 1 * 1024 * 1024 * 1024
+MAX_WORKERS = max(2, multiprocessing.cpu_count() * 2)
+BASELINE_FILE = "baseline.json"
 class NetworkMonitor:
-    def __init__(self, terminal_output=False):
+    def __init__(self, terminal_output=False, config=None, learn=False,
+                 export_csv=None, export_json=None):
+        self.learn = learn
+        self.export_csv = export_csv
+        self.export_json = export_json
+        self.alerts = []
         self.ALLOWED_PORTS = {22, 53, 80, 443}
         self.ALLOWED_IP_RANGES = [
-            ipaddress.IPv4Network('127.0.0.0/8'),
-            ipaddress.IPv4Network('192.168.1.0/24'),
-            ipaddress.IPv6Network('::1/128')  # IPv6 loopback
+            ipaddress.ip_network("127.0.0.0/8"),
+            ipaddress.ip_network("192.168.1.0/24"),
+            ipaddress.ip_network("::1/128")
         ]
+        self.ALLOWED_PROCESSES = {}
+        self.baseline = {"connections": set(), "process_ports": set()}
+        self.load_baseline()
+        if config:
+            self.load_config(config)
         self.alert_cache = {}
         self.terminal_output = terminal_output
-        file_handler = RotatingFileHandler(
-            '/var/log/network_monitor.log',
-            maxBytes=5 * 1024 * 1024,
-            backupCount=5
-        )
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        handlers = [file_handler]
-        if terminal_output:
-            console = logging.StreamHandler()
-            console.setFormatter(formatter)
-            handlers.append(console)
-        # Safe logging setup
         root = logging.getLogger()
-        root.setLevel(logging.INFO)
-        for h in handlers:
-            root.addHandler(h)
-    def check_disk_space(self):
-        total, used, free = shutil.disk_usage("/")
-        if free < DISK_SPACE_THRESHOLD:
-            logging.error("Disk space is low! Stopping the script.")
-            return False
-        return True
+        if not root.handlers:
+            handler = RotatingFileHandler(
+                "/var/log/network_monitor.log",
+                maxBytes=5 * 1024 * 1024,
+                backupCount=5
+            )
+            formatter = logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s"
+            )
+            handler.setFormatter(formatter)
+            root.setLevel(logging.INFO)
+            root.addHandler(handler)
+            if terminal_output:
+                console = logging.StreamHandler()
+                console.setFormatter(formatter)
+                root.addHandler(console)
+    def load_config(self, path):
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        self.ALLOWED_PORTS |= set(cfg.get("ports", []))
+        self.ALLOWED_IP_RANGES.extend(
+            ipaddress.ip_network(n) for n in cfg.get("ip_ranges", [])
+        )
+        self.ALLOWED_PROCESSES = cfg.get("processes", {})
+    def load_baseline(self):
+        if os.path.exists(BASELINE_FILE):
+            with open(BASELINE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+                self.baseline["connections"] = set(data.get("connections", []))
+                self.baseline["process_ports"] = set(data.get("process_ports", []))
+    def save_baseline(self):
+        with open(BASELINE_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "connections": list(self.baseline["connections"]),
+                    "process_ports": list(self.baseline["process_ports"])
+                },
+                f,
+                indent=2
+            )
     def rate_limited(self, key):
         now = time.time()
         last = self.alert_cache.get(key, 0)
         if now - last < RATE_LIMIT_SECONDS:
-            logging.debug(f"Rate limit exceeded for {key}, skipping alert.")
             return True
         self.alert_cache[key] = now
         return False
-    def clean_ip(self, ip):
-        return ip.split('%')[0]
-    def is_ip_allowed(self, dest_ip):
+    @staticmethod
+    def clean_ip(ip):
+        return ip.split("%", 1)[0]
+
+    def is_ip_allowed(self, ip):
         try:
-            ip_obj = ipaddress.ip_address(self.clean_ip(dest_ip))
-            return any(ip_obj in net for net in self.ALLOWED_IP_RANGES)
+            addr = ipaddress.ip_address(self.clean_ip(ip))
+            return any(addr in net for net in self.ALLOWED_IP_RANGES)
         except ValueError:
             return False
-    def extract_pid(self, text):
-        if "pid=" not in text:
-            return None
+    @staticmethod
+    def get_ss(args):
         try:
-            return int(text.split("pid=")[1].split(",")[0])
-        except (IndexError, ValueError):
-            return None
-    def get_active_connections(self):
-        try:
-            result = subprocess.run(['ss', '-tun'],
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL,
-                                    check=False)
-            if not result.stdout:
-                return []
-            return result.stdout.decode().splitlines()[1:]
-        except Exception as e:
-            logging.debug(f"Error retrieving active connections: {e}")
-            return []
-    def get_process_connections(self):
-        try:
-            result = subprocess.run(['ss', '-tunp'],
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL,
-                                    check=False)
-            if not result.stdout:
-                return []
-            return result.stdout.decode().splitlines()[1:]
-        except Exception as e:
-            logging.debug(f"Error retrieving process connections: {e}")
+            r = subprocess.run(
+                ["ss"] + args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False
+            )
+            return r.stdout.decode().splitlines()[1:]
+        except Exception:
             return []
     def process_connection(self, line):
-        try:
-            columns = line.split()
-            if len(columns) < 5:
+        cols = line.split()
+        if len(cols) < 6:
+            return
+        proto = cols[0]
+        dest = cols[4]
+        if ":" not in dest:
+            return
+        ip, port = dest.rsplit(":", 1)
+        if not port.isdigit():
+            return
+        port = int(port)
+        key = f"{proto}:{ip}:{port}"
+        if self.learn:
+            self.baseline["connections"].add(key)
+            return
+        if key in self.baseline["connections"]:
+            return
+        if port not in self.ALLOWED_PORTS and not self.is_ip_allowed(ip):
+            if self.rate_limited(key):
                 return
-            proto = columns[0]
-            dest = columns[4]
-            if ':' not in dest:
-                return
-            ip, port = dest.rsplit(':', 1)
-            ip = self.clean_ip(ip)
-            if ip == "127.0.0.1" or ip == "::1":
-                return
-            if not port.isdigit():
-                return
-            port = int(port)
-            alert_key = f"conn:{ip}:{port}:{proto}"
-            if port not in self.ALLOWED_PORTS and not self.is_ip_allowed(ip):
-                if self.rate_limited(alert_key):
-                    return
-                logging.warning("[ALERT] Unusual outbound connection")
-                logging.warning(f"Protocol: {proto}")
-                logging.warning(f"Destination: {ip}:{port}")
-            else:
-                logging.info(f"[OK] {proto} -> {ip}:{port}")
-        except Exception as e:
-            logging.debug(f"Connection error: {e}")
+            msg = f"Unusual outbound connection {proto} {ip}:{port}"
+            logging.warning(msg)
+            self.alerts.append(msg)
     def process_process(self, line):
+        if "pid=" not in line:
+            return
         try:
-            columns = line.split()
-            if len(columns) < 6:
+            pid = int(line.split("pid=", 1)[1].split(",", 1)[0])
+            proc = psutil.Process(pid)
+        except Exception:
+            return
+        cols = line.split()
+        if len(cols) < 6:
+            return
+        dest = cols[4]
+        if ":" not in dest:
+            return
+        port = dest.rsplit(":", 1)[-1]
+        if not port.isdigit():
+            return
+        port = int(port)
+        pname = proc.name()
+        key = f"{pname}:{port}"
+        if self.learn:
+            self.baseline["process_ports"].add(key)
+            return
+        if key in self.baseline["process_ports"]:
+            return
+        allowed_ports = self.ALLOWED_PROCESSES.get(pname, [])
+        if port not in allowed_ports and port not in self.ALLOWED_PORTS:
+            if self.rate_limited(key):
                 return
-            pid = self.extract_pid(line)
-            if pid is None:
-                return
-            dest = columns[4]
-            if ':' not in dest:
-                return
-            port = dest.rsplit(':', 1)[-1]
-            if not port.isdigit():
-                return
-            port = int(port)
-            alert_key = f"proc:{pid}:{port}"
-            if port not in self.ALLOWED_PORTS:
-                if self.rate_limited(alert_key):
-                    return
-                try:
-                    proc = psutil.Process(pid)
-                    logging.warning("[ALERT] Process using non-standard port")
-                    logging.warning(f"Process: {proc.name()} (PID {pid})")
-                    logging.warning(f"Port: {port}")
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-                    logging.warning(f"[ALERT] Unable to access process {pid}: {str(e)}")
-        except Exception as e:
-            logging.debug(f"Process error: {e}")
-    def process_with_threadpool(self, lines, func):
-        """Process connections or processes using a thread pool."""
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(func, line) for line in lines]
-            for _ in as_completed(futures):
-                pass  # Wait for all to finish
-    def run(self, continuous=False):
-        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            msg = f"Process {pname} (PID {pid}) using port {port}"
+            logging.warning(msg)
+            self.alerts.append(msg)
+    def run(self, continuous=False, once=False, duration=None):
+        if os.geteuid() != 0:
             print("Must be run as root.")
             return
-        if not self.check_disk_space():
+        def once_scan():
+            conns = self.get_ss(["-tun"])
+            procs = self.get_ss(["-tunp"])
+            with ThreadPoolExecutor(MAX_WORKERS) as ex:
+                for l in conns:
+                    ex.submit(self.process_connection, l)
+                for l in procs:
+                    ex.submit(self.process_process, l)
+        start_time = time.time()
+        if once:
+            self.terminal_output = True
+            once_scan()
+            self._print_terminal_summary()
+            if self.learn:
+                self.save_baseline()
             return
-        logging.info("Network monitor started")
-        def run_once():
-            self.process_with_threadpool(self.get_active_connections(), self.process_connection)
-            self.process_with_threadpool(self.get_process_connections(), self.process_process)
         if continuous:
             while True:
-                if not self.check_disk_space():
-                    return
-                run_once()
+                once_scan()
+                if duration and (time.time() - start_time) >= duration:
+                    break
                 time.sleep(10)
         else:
-            run_once()
-            logging.info("One-time network scan completed")
+            once_scan()
+        if self.learn:
+            self.save_baseline()
+        if self.export_csv:
+            with open(self.export_csv, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                for a in self.alerts:
+                    w.writerow([a])
+        if self.export_json:
+            with open(self.export_json, "w", encoding="utf-8") as f:
+                json.dump(self.alerts, f, indent=2)
+    def _print_terminal_summary(self):
+        if not self.alerts:
+            print("\nNo alerts detected.")
+            return
+        print("\n=== Network Monitor Alerts Summary ===")
+        for i, a in enumerate(self.alerts, 1):
+            print(f"{i}. {a}")
+        print("=====================================\n")
 def main():
-    parser = argparse.ArgumentParser(description="Network Monitor")
-    parser.add_argument("-c", "--continuous", action="store_true", help="Run continuously")
-    parser.add_argument("-o", "--one-time", action="store_true", help="Run once")
-    parser.add_argument("--terminal", action="store_true", help="Output to terminal as well as log")
-    args = parser.parse_args()
-    if not any(vars(args).values()):
-        parser.print_help()
-        return
-    monitor = NetworkMonitor(terminal_output=args.terminal)
-    try:
-        if args.continuous:
-            monitor.run(continuous=True)
-        else:
-            monitor.run(continuous=False)
-    except KeyboardInterrupt:
-        print("\nMonitor stopped by user.")
+    p = argparse.ArgumentParser(
+        description="Network connection and process monitor with baseline learning"
+    )
+    p.add_argument("-c", "--continuous", action="store_true",
+                   help="Run continuously (poll every 10 seconds)")
+    p.add_argument("--terminal", action="store_true",
+                   help="Also log alerts to the terminal")
+    p.add_argument("--config", help="Path to JSON config file")
+    p.add_argument("--learn", action="store_true",
+                   help="Learn baseline instead of alerting")
+    p.add_argument("--export-csv", help="Export alerts to CSV file")
+    p.add_argument("--export-json", help="Export alerts to JSON file")
+    p.add_argument("--once", action="store_true",
+                   help="Run one-time scan and display results immediately")
+    p.add_argument("--duration", type=int,
+                   help="Run for N seconds before exiting (continuous only)")
+    args = p.parse_args()
+    m = NetworkMonitor(
+        terminal_output=args.terminal,
+        config=args.config,
+        learn=args.learn,
+        export_csv=args.export_csv,
+        export_json=args.export_json
+    )
+    m.run(
+        continuous=args.continuous,
+        once=args.once,
+        duration=args.duration
+    )
 if __name__ == "__main__":
     main()
