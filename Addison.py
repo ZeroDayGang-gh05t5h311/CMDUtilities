@@ -408,14 +408,25 @@ def icmd():
         except Exception as e:
             pass
     elif tmp == "sila":
-        target = tool.getInput(False, "Target host: \n$: ")
-        outputname = tool.getInput(False,"Output file name:\n$: ")
-        """
-        jsonext = "--json "+outputname+".json"
-        htmlext = "--html "+outputname+".html"
-        csvext =  "--csv "+outputname+".csv"
-        """
-        tool.cmd("python3 sila.py %s --verbose --json %s"%(target,outputname))
+        isHost = tool.getInput(False, "Using a hostfile? (yes|no): \n$: ")
+        if isHost.lower() == "y" or "yes":
+            try:
+                hostfile = tool.getInput(False,"Hostfile name:\n$: ")
+                outputname = tool.getInput(False, "Output file name:\n$: ")
+                jsonext = outputname
+                csvext = outputname 
+                tool.cmd("python3 sila.py %s --verbose --json %s --csv %s"%(jsonext,csvext,hostfile))
+            except KeyboardInterrupt:
+                pass
+        else:
+            try:
+                target = tool.getInput(False, "Target host: \n$: ")
+                outputname = tool.getInput(False, "Output file name:\n$: ")
+                jsonext = outputname
+                csvext = outputname 
+                tool.cmd("python3 sila.py --verbose --json %s --csv %s "%(target,jsonext,csvext,hostfile))
+            except KeyboardInterrupt:
+                pass
     elif tmp == "strcalc":
         tool.strcalc()
     elif tmp == "cls":
@@ -426,18 +437,19 @@ def icmd():
     elif tmp == "cmd":
         tool.cmd("%s"%(tool.getInput(False,"CMD: ")))
     elif tmp == "exit":
-        tool.cmd(["rm -rf '__pycache__'"], capture=True)
+        tool.cmd("rm -rf '__pycache__'", capture=True)
         exit()
 tmp = "" 
 try: 
     while tmp != "exit": 
         tmp = icmd() #surprisingly efficient
 except Exception:
-    tool.cmd(["rm -rf '__pycache__'"], capture=True);exit()
-finally:
     try:
-        tool.cmd(["rm -rf '__pycache__'"], capture=True)
+        tool.cmd("rm -rf __pycache__", capture=True)
+    except FileNotFoundError:
+        print("No cache... see you again.",)
+except FileNotFoundError:
+    try:
+        tool.cmd("rm -rf __pycache__", capture=True)
     except FileNotFoundError:
         print("No cache to remove")
-    finally:
-        print("See you again.")
