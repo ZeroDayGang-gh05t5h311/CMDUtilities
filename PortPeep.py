@@ -12,7 +12,16 @@ from logging.handlers import RotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 RATE_LIMIT_SECONDS = 60
-DISK_SPACE_THRESHOLD = 1 * 1024 * 1024 * 1024
+# Dynamically determine disk capacity and set threshold
+try:
+    _disk_usage = psutil.disk_usage("/")
+    MAX_DISK_CAPACITY = _disk_usage.total
+    # Maintain same logical behavior but scale relative to disk size
+    DISK_SPACE_THRESHOLD = int(MAX_DISK_CAPACITY * 0.01)  # 1% of total disk
+except Exception:
+    # Fallback to original fixed threshold if detection fails
+    MAX_DISK_CAPACITY = None
+    DISK_SPACE_THRESHOLD = 1 * 1024 * 1024 * 1024
 MAX_WORKERS = max(2, multiprocessing.cpu_count() * 2)
 BASELINE_FILE = "baseline.json"
 class NetworkMonitor:
@@ -66,6 +75,7 @@ class NetworkMonitor:
                 data = json.load(f)
                 self.baseline["connections"] = set(data.get("connections", []))
                 self.baseline["process_ports"] = set(data.get("process_ports", []))
+
     def save_baseline(self):
         with open(BASELINE_FILE, "w", encoding="utf-8") as f:
             json.dump(
@@ -86,7 +96,6 @@ class NetworkMonitor:
     @staticmethod
     def clean_ip(ip):
         return ip.split("%", 1)[0]
-
     def is_ip_allowed(self, ip):
         try:
             addr = ipaddress.ip_address(self.clean_ip(ip))
@@ -168,6 +177,7 @@ class NetworkMonitor:
         def once_scan():
             conns = self.get_ss(["-tun"])
             procs = self.get_ss(["-tunp"])
+
             with ThreadPoolExecutor(MAX_WORKERS) as ex:
                 for l in conns:
                     ex.submit(self.process_connection, l)
@@ -178,6 +188,7 @@ class NetworkMonitor:
             self.terminal_output = True
             once_scan()
             self._print_terminal_summary()
+
             if self.learn:
                 self.save_baseline()
             return
