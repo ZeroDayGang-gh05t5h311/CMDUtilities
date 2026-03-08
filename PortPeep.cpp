@@ -140,7 +140,7 @@ void process_process(const string& line, bool terminal) {
     log_msg("WARN", "Process " + pname + " (PID " +
             to_string(pid) + ") using port " +
             to_string(port), terminal);
-}
+};
 void run_monitor(bool continuous, bool terminal) {
     if (geteuid() != 0) {
         cerr << "Must be run as root\n";
@@ -182,25 +182,16 @@ void sigint(int) {
 }
 int main(int argc, char** argv) {
     bool continuous = false;
-    bool one_time = false;
     bool terminal = false;
     for (int i = 1; i < argc; ++i) {
         string a = argv[i];
         if (a == "--continuous" || a == "-c") continuous = true;
-        else if (a == "--one-time" || a == "-o") one_time = true;
-        else if (a == "--terminal") terminal = true;
-    }
-    if (!continuous && !one_time) {
-        cout << "Usage:\n"
-             << "  --continuous | -c   Run continuously\n"
-             << "  --one-time   | -o   Run once\n"
-             << "  --terminal          Output to terminal\n";
+        if (a == "--terminal") terminal = true;
+   }
+    if (!continuous && argc == 1) {
+        cout << "Usage: --continuous [--terminal]\n";
         return 0;
     }
     signal(SIGINT, sigint);
-    if (continuous)
-        run_monitor(true, terminal);
-    else
-        run_monitor(false, terminal);
-    return 0;
-}
+    run_monitor(continuous, terminal);
+};
