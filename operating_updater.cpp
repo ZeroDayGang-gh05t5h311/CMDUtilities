@@ -405,6 +405,7 @@ public:
 // ----------------------
 int main(int argc, char* argv[]) {
     UpdaterManager manager;
+    cout << "If you can't work it out, try '--h'." << endl;
     if (argc > 1) {
         string arg = argv[1];
         if (arg == "--help" || arg == "help" || arg  == "--h" || arg == "-h" || arg == "" || arg == " ") {
