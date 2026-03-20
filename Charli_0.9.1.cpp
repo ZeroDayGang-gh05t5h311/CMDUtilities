@@ -9,7 +9,8 @@
 #include <stdexcept>  // For exception handling
 #include <cctype>     // For character classification (isdigit, isalnum)
 #include <cstdlib>    // For system-related utilities
-#include <algorithm> //for algorithm things.
+#include <algorithm>  // For algorithm things
+#include <regex>      // For regular expressions
 #if defined(_WIN32)
     #include <windows.h> // Windows-specific headers
     #define OS_WIN 1
@@ -25,17 +26,24 @@ class Input {
 public:
     // Get a string from the user
     static string str(const string& prompt) {
-        cout << prompt; 
-        string input; 
-        getline(cin, input); 
+        cout << prompt;
+        string input;
+        getline(cin, input);
         return input;
     }
     // Get an integer from the user, with exception handling
     static int integer(const string& prompt) {
-        try { 
-            return stoi(str(prompt)); 
-        } catch (...) { 
+        try {
+            return stoi(str(prompt));  // Convert string to integer
+        } catch (const invalid_argument& e) {
+            cerr << "Invalid argument: " << e.what() << endl;
             return 0; // Return 0 if there's an error
+        } catch (const out_of_range& e) {
+            cerr << "Out of range: " << e.what() << endl;
+            return 0; // Return 0 if there's an error
+        } catch (...) {
+            cerr << "An unknown error occurred." << endl;
+            return 0; // Default error return
         }
     }
     // Check if a string is safe (alphanumeric or certain symbols)
@@ -43,6 +51,12 @@ public:
         return all_of(str.begin(), str.end(), [](char c) {
             return isalnum((unsigned char)c) || c == '/' || c == '_' || c == '.' || c == '-' || c == ':';
         });
+    }
+    // Validate if host is a valid IP address or domain
+    static bool isValidHost(const string& host) {
+        // Corrected regular expression pattern for a basic domain name
+        regex pattern(R"(^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$)");
+        return regex_match(host, pattern);
     }
 };
 // Class to handle system commands
@@ -62,7 +76,10 @@ public:
 #else
         FILE* fp = popen(cmd.c_str(), "r");   // Unix command execution
 #endif
-        if (!fp) return ""; // If file pointer is null, return empty string
+        if (!fp) {
+            cerr << "[ERROR] Command execution failed.\n";
+            return "";
+        }
         while (fgets(buf.data(), buf.size(), fp)) out += buf.data(); // Read output
 #if OS_WIN
         _pclose(fp);  // Close Windows process handle
@@ -137,7 +154,6 @@ class Calculator {
             }
         }
     };
-
 public:
     // Evaluate an expression and store the result in 'out'
     static bool eval(const string& expr, double& out) {
@@ -174,13 +190,22 @@ public:
     }
     // Create a new directory
     static void mkdir() { 
-        fs::create_directories(Input::str("Directory name: ")); 
-        cout << "[INFO] Directory created\n"; 
+        string dir_name = Input::str("Directory name: "); 
+        if (fs::exists(dir_name)) {
+            cout << "[INFO] Directory already exists.\n";
+        } else {
+            fs::create_directories(dir_name);
+            cout << "[INFO] Directory created.\n";
+        }
     }
     // Read from a file
     static void read() { 
+        string file = Input::str("File: ");
+        if (!fs::exists(file)) {
+            cerr << "[ERROR] File does not exist.\n";
+            return;
+        }
         ifstream f; 
-        string file = Input::str("File: "); 
         if (!openFile(f, file)) return; 
         cout << f.rdbuf(); // Output file contents to console
     }
@@ -194,8 +219,12 @@ public:
     }
     // Search a term in a file
     static void search() { 
+        string file = Input::str("File: ");
+        if (!fs::exists(file)) {
+            cerr << "[ERROR] File does not exist.\n";
+            return;
+        }
         ifstream f; 
-        string file = Input::str("File: "); 
         if (!openFile(f, file)) return; 
         string term = Input::str("Term: "), line; 
         while (getline(f, line)) { 
@@ -206,6 +235,10 @@ public:
     // XOR encryption of a file
     static void xor_encrypt() { 
         string file = Input::str("File: "); 
+        if (!fs::exists(file)) { 
+            cerr << "[ERROR] File does not exist.\n"; 
+            return; 
+        }
         string key = Input::str("Key: "); 
         if (key.empty()) { 
             cerr << "[ERROR] Empty key\n"; 
@@ -235,8 +268,8 @@ public:
     // Ping a host
     static void ping() { 
         string host = Input::str("Host: "); 
-        if (!Input::safe(host)) { 
-            cerr << "[ERROR]\n"; 
+        if (!Input::isValidHost(host)) { 
+            cerr << "[ERROR] Invalid host\n"; 
             return; 
         }
         vector<string> cmd = { "ping", host }; 
@@ -296,7 +329,7 @@ public:
         #if OS_WIN 
         Command::run({ "cmd", "/c", "del", "/q", "/f", "/s", "%TEMP%\\*" }); 
         #else 
-        Command::run({ "rm", "-rf", "/tmp/*" }); 
+        Command::run({ "bleachbit" }); 
         #endif 
     }
     // Display memory information
@@ -319,7 +352,7 @@ public:
     static void killproc() { 
         string pid = Input::str("PID: "); 
         if (!Input::safe(pid)) { 
-            cerr << "[ERROR]\n"; 
+            cerr << "[ERROR] Invalid PID\n"; 
             return; 
         }
         #if OS_WIN 
@@ -336,7 +369,7 @@ public:
     static void run() { 
         ofstream f("directory_map.txt"); 
         if (!f) { 
-            cerr << "[ERROR]\n"; 
+            cerr << "[ERROR] Failed to create directory map file\n"; 
             return; 
         }
         walk(fs::current_path(), f, 0); 
@@ -367,9 +400,15 @@ static void helpmenu() {
 }
 // Main entry point of the application
 int main() { 
-    printMenu(); // Show the main menu
-    while (true) { 
-        switch (Input::integer("Choice: ")) { 
+    printMenu();
+    int choice;
+    do {
+        choice = Input::integer("Choice: ");
+        if (choice < 0 || choice > 18) {
+            cerr << "[ERROR] Invalid choice, please try again.\n";
+            continue;
+        }
+        switch (choice) { 
             case 1: { 
                 double result; 
                 if (Calculator::eval(Input::str("Expr: "), result)) 
@@ -398,7 +437,8 @@ int main() {
             case 16: SystemOps::killproc(); break; 
             case 17: DirectoryMap::run(); break; 
             case 18: helpmenu(); break; 
-            case 0: cout << "Not an option: exiting!\n"; return 0; 
+            case 0: cout << "Not an option: exiting!\n"; 
+            return 0;
         } 
-    }
+    } while (choice != 0);
 }
