@@ -1,162 +1,130 @@
-#!/bin/sh
-# POSIX Network Monitor – Exact behavioral port of Python version
-# No non-standard dependencies
-LOG_FILE="/var/log/network_monitor.log"
-LOG_MAX_BYTES=5242880
-LOG_BACKUPS=5
+#!/usr/bin/bash
 RATE_LIMIT_SECONDS=60
-DISK_SPACE_THRESHOLD_KB=1048576   # 1GB
-STATE_DIR="/tmp/network_monitor_state"
-ALLOWED_PORTS="22 53 80 443"
-# Allowed IPv4 CIDRs (exact Python equivalent)
-ALLOWED_IPV4_CIDRS="127.0.0.0/8 192.168.1.0/24"
-ALLOW_IPV6_LOOPBACK=1
-mkdir -p "$STATE_DIR" || exit 1
-timestamp() {
-    date '+%Y-%m-%d %H:%M:%S'
-}
+BASELINE_FILE="baseline.json"
+LOG_FILE="/var/log/network_monitor.log"
+MAX_LOG_SIZE=$((5 * 1024 * 1024))  # 5 MB
+DISK_USAGE_THRESHOLD=95  # 95% disk usage
+ALLOWED_PORTS=(22 53 443 8080)
+ALLOWED_IP_RANGES=("127.0.0.0/8" "192.168.1.0/24")
 rotate_logs() {
-    [ -f "$LOG_FILE" ] || return
-    size=$(wc -c < "$LOG_FILE")
-    [ "$size" -lt "$LOG_MAX_BYTES" ] && return
-
-    i=$LOG_BACKUPS
-    while [ $i -gt 1 ]; do
-        prev=$((i - 1))
-        [ -f "$LOG_FILE.$prev" ] && mv "$LOG_FILE.$prev" "$LOG_FILE.$i"
-        i=$prev
-    done
-    mv "$LOG_FILE" "$LOG_FILE.1"
+    if [ -f "$LOG_FILE" ]; then
+        LOG_SIZE=$(stat -c %s "$LOG_FILE")
+        if [ "$LOG_SIZE" -ge "$MAX_LOG_SIZE" ]; then
+            mv "$LOG_FILE" "$LOG_FILE.1"
+        fi
+    fi
 }
-log() {
-    level="$1"
-    msg="$2"
+log_msg() {
+    local msg="$1"
     rotate_logs
-    printf "%s - %s - %s\n" "$(timestamp)" "$level" "$msg" >> "$LOG_FILE"
-    [ "$TERMINAL_OUTPUT" = "1" ] && printf "%s - %s\n" "$level" "$msg"
-}
-
-die() {
-    log "ERROR" "$1"
-    exit 1
-}
-check_root() {
-    [ "$(id -u)" -ne 0 ] && die "Must be run as root."
+    echo "$msg" >> "$LOG_FILE"
+    echo "$msg"
 }
 check_disk_space() {
-    free_kb=$(df / | awk 'NR==2 {print $4}')
-    [ "$free_kb" -lt "$DISK_SPACE_THRESHOLD_KB" ] && \
-        die "Disk space is low! Stopping the script."
-}
-rate_limited() {
-    key="$1"
-    now=$(date +%s)
-    file="$STATE_DIR/$key"
-
-    if [ -f "$file" ]; then
-        last=$(cat "$file")
-        [ $((now - last)) -lt "$RATE_LIMIT_SECONDS" ] && return 0
+    # Get disk usage percentage
+    local usage=$(df / --output=pcent | tail -n 1 | tr -d '%')
+    if [ "$usage" -gt "$DISK_USAGE_THRESHOLD" ]; then
+        log_msg "Disk usage is above $DISK_USAGE_THRESHOLD%. Terminating program."
+        return 1
     fi
-
-    echo "$now" > "$file"
-    return 1
+    return 0
 }
-is_allowed_port() {
-    for p in $ALLOWED_PORTS; do
-        [ "$p" = "$1" ] && return 0
-    done
-    return 1
+load_config() {
+    local config_file="$1"
+    if [ -f "$config_file" ]; then
+        # Parse JSON config using jq
+        ALLOWED_PORTS=$(jq -r '.ports[]' "$config_file")
+        ALLOWED_IP_RANGES=$(jq -r '.ip_ranges[]' "$config_file")
+        # Process allowed processes (just an example - you can adapt it)
+        ALLOWED_PROCESSES=$(jq -r '.processes | to_entries | .[] | "\(.key):\(.value | join(", "))"' "$config_file")
+    fi
 }
-ipv4_in_cidr() {
-    ip="$1"
-    cidr="$2"
-    net=$(echo "$cidr" | cut -d/ -f1)
-    maskbits=$(echo "$cidr" | cut -d/ -f2)
-    ip_dec=$(printf "%d\n" "$(echo "$ip" | awk -F. '{print ($1<<24)+($2<<16)+($3<<8)+$4}')")
-    net_dec=$(printf "%d\n" "$(echo "$net" | awk -F. '{print ($1<<24)+($2<<16)+($3<<8)+$4}')")
-    mask=$((0xFFFFFFFF << (32 - maskbits) & 0xFFFFFFFF))
-
-    [ $((ip_dec & mask)) -eq $((net_dec & mask)) ]
+process_conn() {
+    local line="$1"
+    local proto=$(echo "$line" | awk '{print $1}')
+    local ip=$(echo "$line" | awk '{print $5}' | cut -d: -f1)
+    local port=$(echo "$line" | awk '{print $5}' | cut -d: -f2)
+    local key="$proto:$ip:$port"
+    if [[ ! " ${ALLOWED_PORTS[@]} " =~ " $port " ]] && ! ip_in_allowed_range "$ip"; then
+        if ! rate_limited "$key"; then
+            log_msg "Unusual outbound connection $key"
+        fi
+    fi
 }
-is_allowed_ip() {
-    ip="$1"
-    # IPv6 loopback
-    [ "$ip" = "::1" ] && [ "$ALLOW_IPV6_LOOPBACK" -eq 1 ] && return 0
-    # IPv4 CIDRs
-    echo "$ip" | grep -q ':' && return 1
-    for cidr in $ALLOWED_IPV4_CIDRS; do
-        ipv4_in_cidr "$ip" "$cidr" && return 0
-    done
-    return 1
-}
-clean_ip() {
-    echo "$1" | cut -d% -f1
-}
-process_connections() {
-    ss -tun | awk 'NR>1 {print $1, $5}' | while read proto dest; do
-        ip=$(clean_ip "$(echo "$dest" | cut -d: -f1)")
-        port=$(echo "$dest" | awk -F: '{print $NF}')
-        echo "$port" | grep -q '^[0-9]\+$' || continue
-        [ "$ip" = "127.0.0.1" ] || [ "$ip" = "::1" ] && continue
-        key="conn_${ip}_${port}_${proto}"
-        if ! is_allowed_port "$port" && ! is_allowed_ip "$ip"; then
-            rate_limited "$key" && continue
-            log "WARN" "[ALERT] Unusual outbound connection"
-            log "WARN" "Protocol: $proto"
-            log "WARN" "Destination: $ip:$port"
-        else
-            log "INFO" "[OK] $proto -> $ip:$port"
+ip_in_allowed_range() {
+    local ip="$1"
+    for range in "${ALLOWED_IP_RANGES[@]}"; do
+        if [[ "$ip" =~ $range ]]; then
+            return 0
         fi
     done
+    return 1
 }
-process_processes() {
-    ss -tunp | while read line; do
-        echo "$line" | grep -q pid= || continue
-        dest=$(echo "$line" | awk '{print $5}')
-        port=$(echo "$dest" | awk -F: '{print $NF}')
-        echo "$port" | grep -q '^[0-9]\+$' || continue
-        pid=$(echo "$line" | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p')
-        [ -z "$pid" ] && continue
-        is_allowed_port "$port" && continue
-        key="proc_${pid}_${port}"
-        rate_limited "$key" && continue
-        name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
-        log "WARN" "[ALERT] Process using non-standard port"
-        log "WARN" "Process: $name (PID $pid)"
-        log "WARN" "Port: $port"
-    done
+rate_limited() {
+    local key="$1"
+    local current_time=$(date +%s)
+    if [[ -f "$key" && $(($current_time - $(cat "$key"))) -lt $RATE_LIMIT_SECONDS ]]; then
+        return 0
+    fi
+    echo "$current_time" > "$key"
+    return 1
 }
-run_once() {
-    check_disk_space
-    process_connections
-    process_processes
+monitor_network() {
+    local continuous="$1"
+    local once="$2"
+    local duration="$3"
+
+    # Disk Space Check (run in background)
+    check_disk_space &
+    # Monitor connections
+    if [ "$once" == true ]; then
+        ss -tun | tail -n +2 | while read -r line; do
+            process_conn "$line"
+        done
+    fi
+    if [ "$continuous" == true ]; then
+        local start_time=$(date +%s)
+        while true; do
+            ss -tun | tail -n +2 | while read -r line; do
+                process_conn "$line"
+            done
+            if [ "$duration" -gt 0 ]; then
+                local elapsed_time=$(($(date +%s) - start_time))
+                if [ "$elapsed_time" -ge "$duration" ]; then
+                    break
+                fi
+            fi
+            sleep 10
+        done
+    fi
 }
-usage() {
-    echo "Usage:"
-    echo "  $0 --continuous"
-    echo "  $0 --one-time"
-    echo "  $0 --terminal"
+print_help() {
+    echo "Usage: portpeep [options]"
+    echo "Options:"
+    echo "  -h, --help                Show this help message"
+    echo "  --continuous              Run continuously (poll every 10 seconds)"
+    echo "  --once                    Run one-time scan and display results immediately"
+    echo "  --learn                   Learn baseline instead of alerting"
+    echo "  --terminal                Also log alerts to the terminal"
+    echo "  --config <path>           Path to JSON config file"
+    echo "  --duration <seconds>      Run for N seconds before exiting (continuous only)"
 }
-check_root
-CONTINUOUS=0
-TERMINAL_OUTPUT=0
-[ $# -eq 0 ] && usage && exit 0
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -c|--continuous) CONTINUOUS=1 ;;
-        -o|--one-time) CONTINUOUS=0 ;;
-        --terminal) TERMINAL_OUTPUT=1 ;;
-        *) usage; exit 1 ;;
+continuous=false
+once=false
+duration=0
+learn=false
+terminal=false
+while [[ "$1" != "" ]]; do
+    case $1 in
+        -h | --help )          print_help; exit 0 ;;
+        --continuous )         continuous=true ;;
+        --once )               once=true ;;
+        --learn )              learn=true ;;
+        --terminal )           terminal=true ;;
+        --config )             shift; load_config "$1" ;;
+        --duration )           shift; duration="$1" ;;
+        * )                    echo "Invalid option: $1"; exit 1 ;;
     esac
     shift
 done
-log "INFO" "Network monitor started"
-if [ "$CONTINUOUS" -eq 1 ]; then
-    while :; do
-        run_once
-        sleep 10
-    done
-else
-    run_once
-    log "INFO" "One-time network scan completed"
-fi
+monitor_network "$continuous" "$once" "$duration"
