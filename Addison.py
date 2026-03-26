@@ -8,59 +8,16 @@ import bisect,string,csv,json,argparse,socket,ssl,threading,queue
 import random,sys,os,subprocess,ast,operator,platform,re,io,time
 import requests,urllib3
 try:
-    from cves import *
-except ModuleNotFoundError:
-    try:    
-        print("Module not found! Downloading the required file...")
-        cves_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/CVES.py"
-        cves_filename = 'cves.py'  # Save as 'cves.py' to avoid case issues
-    except HTTPSConnectionPool:
-        print("Oh you need to be on the internet to get this module...failed to get cves.")   
-    try:
-        response = requests.get(cves_url)
-        #response.raise_for_status()
-        with open(cves_filename, 'wb') as file:
-            file.write(response.content)        
-        print("File downloaded successfully as '%s'."%(cves_filename))
-        # Now try importing again
-        from cves import *
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading the file: {e}")
-    except NameResolutionError:
-        print("Error downloading the file, you need to be connected to the internet.") 
-try:
-    from cves_asm import *
-except ModuleNotFoundError:
-    print("Module not found! Starting to download...")
-    cves_asm_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/CVES_ASM.py"
-    cves_asm_filename = 'cves_asm.py'
-    try:
-        response_asm = requests.get(cves_asm_url)
-        response_asm.raise_for_status()
-        with open(cves_asm_filename, 'wb') as file:
-            file.write(response_asm.content)        
-        print(f"File downloaded successfully as '%s'."%(cves_asm_filename))
-        from cves_asm import *
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading the file: {e}")
-    except NameResolutionError:
-        print(f"Error downloading the file, you need to be connected to the internet.")
-try:
     from sila import *
 except ModuleNotFoundError:
     print("Not found the sila module! Downloading...")
-    try:
-        sila_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/Scanners/refs/heads/main/Sila.py"
-        responce_sila = requests.get(sila_url)
-        responce_sila.raise_for_status()
-        silafilename = "sila.py"
-        with open(silafilename, "wb") as file:
-            file.write(response_sila.content)
-        print("Downloaded successfully as %s."%(silafilename))
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading the file: {e}")
-    except NameResolutionError:
-        print(f"Error downloading the file, you need to be connected to the internet.")
+    sila_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/SILA/refs/heads/main/py"
+    res_sila = requests.get(sila_url)
+    res_sila.raise_for_status()
+    silafilename = "sila.py"
+    with open(silafilename, "wb") as file:
+        file.write(res_sila.content)
+    print("Downloaded successfully as %s."%(silafilename))
 class SafeCalc:
     OPS = {
         ast.Add: operator.add,
@@ -345,8 +302,6 @@ cmds = [
     "pchk: checks services on a port.", 
     "lsys: runs various system commands and appends their outputs to a file.",
     "dirmap: maps a directory tree of the whole filesystem and put's it in a file(code not implemented).",
-    "ascan: assembly scanner(.asm|binary files files).",
-    "cves: static vulnerabilities scanner (JavaScript/BASH/C/C++/python) + hard-coded credentials etc.[Please give a directory to scan or it will exit]",
     "sila: does a banner grab for common ports(ftp(21),ssh(22),telnet(23),SMTP(25),http(80). Usage: 'bg --timeout --threads --json filename [domain]'",
     "strcalc: calculates streaming service payouts(estimated).",
     "cls: clears the screen.",
@@ -392,21 +347,6 @@ def icmd():
         tool.lsys()
     elif tmp == "dirmap":
         tool.dirmap()
-    elif tmp == "ascan":
-        mode = tool.getInput(False, "Mode (--asm or --bin):\n$: ")
-        path = tool.getInput(False, "Path to file:\n$: ")
-        ver = "--verbose"
-        log = "--log outputlog.txt"
-        try:
-            tool.cmd("python3 cves_asm.py %s %s %s %s"%(mode,path,ver,log))
-        except Exception as e:
-            print(f"Error running asm_scanner: {e}")
-    elif tmp == "cves":
-        dirname = tool.getInput(False,"Directory name to scan: ")
-        try:
-            tool.cmd("python3 cves.py %s"%(dirname))
-        except Exception as e:
-            pass
     elif tmp == "sila":
         isHost = tool.getInput(False, "Using a hostfile? (yes|no): \n$: ")
         if isHost.lower() == "y" or "yes":
@@ -437,7 +377,7 @@ def icmd():
     elif tmp == "cmd":
         tool.cmd("%s"%(tool.getInput(False,"CMD: ")))
     elif tmp == "exit":
-        tool.cmd("rm -rf '__pycache__'", capture=True)
+        tool.cmd("rm -rf '__pycache__'", capture=False)
         exit()
 tmp = "" 
 try: 
@@ -445,11 +385,14 @@ try:
         tmp = icmd() #surprisingly efficient
 except Exception:
     try:
-        tool.cmd("rm -rf __pycache__", capture=True)
+        tool.cmd("rm -rf __pycache__", capture=False)
     except FileNotFoundError:
         print("No cache... see you again.",)
 except FileNotFoundError:
     try:
-        tool.cmd("rm -rf __pycache__", capture=True)
+        tool.cmd("rm -rf __pycache__", capture=False)
     except FileNotFoundError:
         print("No cache to remove")
+except KeyboardInterrupt:
+        print("Later!\n")
+exit()
