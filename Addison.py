@@ -10,14 +10,27 @@ import requests,urllib3
 try:
     from sila import *
 except ModuleNotFoundError:
-    print("Not found the sila module! Downloading...")
+    print("sila module not found. Attempting to download...")
+
     sila_url = "https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/SILA/refs/heads/main/py"
-    res_sila = requests.get(sila_url)
-    res_sila.raise_for_status()
     silafilename = "sila.py"
-    with open(silafilename, "wb") as file:
-        file.write(res_sila.content)
-    print("Downloaded successfully as %s."%(silafilename))
+
+    try:
+        res_sila = requests.get(sila_url, timeout=5)
+        res_sila.raise_for_status()
+
+        with open(silafilename, "wb") as file:
+            file.write(res_sila.content)
+
+        print(f"Downloaded successfully as {silafilename}.")
+
+        # Try importing again after download
+        from sila import *
+
+    except requests.exceptions.RequestException:
+        print("Failed to download sila module (no internet or server issue). Continuing without it.")
+    except Exception as e:
+        print(f"Unexpected error while handling sila module: {e}")
 class SafeCalc:
     OPS = {
         ast.Add: operator.add,
