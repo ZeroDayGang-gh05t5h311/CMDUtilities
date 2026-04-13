@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
-enhanced_linux_compromise_check_priority.py
+h3ktic_report.py
 Linux system compromise checker for novice users with scoring, risk classification, detailed follow-up steps,
 and prioritization recommendations.
 Outputs a human-readable report in the current directory.
@@ -13,7 +13,7 @@ RED = "\033[91m"
 YELLOW = "\033[93m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
-TOTAL_SCORE = 0  # cumulative suspiciousness score
+TOTAL_SCORE = 0  # cumulative speciousness score
 SECTION_SCORES = {}  # track individual section scores for prioritization
 def get_report_filename():
     """Generate a unique report filename to avoid duplicates."""
@@ -33,8 +33,6 @@ def write_report(text, color=None):
         print(text)
     with open(REPORT_FILE, "a") as f:
         f.write(text + "\n")
-
-
 def section(title):
     """Write a formatted section header."""
     write_report("\n" + "=" * 80)
@@ -213,3 +211,6 @@ def main():
     write_report("Follow the investigation steps above, starting with the highest")
 if __name__ == "__main__":
     main() 
+""""
+working from home on finding vulnerability's mostly but also a few updates to this GitHub here and there.
+""""
