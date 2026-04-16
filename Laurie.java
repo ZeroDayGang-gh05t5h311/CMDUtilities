@@ -10,7 +10,7 @@ import java.security.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.logging.*;
-public class laurie1 {
+public class Laurie {
     private static final Logger logger = Logger.getLogger(laurie1.class.getName());
     static class SafeCalc {
         private static final Map<Class<?>, BiFunction<Double, Double, Double>> OPS = new HashMap<>();
@@ -80,7 +80,6 @@ public class laurie1 {
         public Object getRight() {
             return right;
         }
-
         public Object getOperator() {
             return operator;
         }
@@ -88,21 +87,17 @@ public class laurie1 {
     static class UnaryOp {
         private Object operand;
         private Object operator;
-
         public UnaryOp(Object operand, Object operator) {
             this.operand = operand;
             this.operator = operator;
         }
-
         public Object getOperand() {
             return operand;
         }
-
         public Object getOperator() {
             return operator;
         }
     }
-
     static class Num {
         private double value;
 
@@ -116,11 +111,9 @@ public class laurie1 {
     }
     static class Constant {
         private double value;
-
         public Constant(double value) {
             this.value = value;
         }
-
         public double getValue() {
             return value;
         }
@@ -246,7 +239,6 @@ public class laurie1 {
                         String whoisResult = cmd("whois " + domain);
                         String digResult = cmd("dig " + domain);
                         String hostResult = cmd("host " + domain);
-                        
                         writer.write(whoisResult);
                         writer.write(digResult);
                         writer.write(hostResult);
@@ -286,19 +278,8 @@ public class laurie1 {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         String choice = "";
+        printHelp();
         while (!choice.equals("exit")) {
-            System.out.println("\n...Laurie...\n");
-            System.out.println("Create Directory (mdir)\n");
-            System.out.println("Read File (read)\n");
-            System.out.println("Write File (write)\n");
-            System.out.println("Append to File (append)\n");
-            System.out.println("Search in File (sfile)\n");
-            System.out.println("Generate Password (mkpasswd)\n");
-            System.out.println("Whois, dig, host (wdh)\n");
-            System.out.println("Streaming Earnings Calculator (strcalc)\n");
-            System.out.println("Help\n");
-            System.out.println("Exit\n");
-            System.out.print("Enter choice: ");
             choice = sc.nextLine();
             switch (choice) {
                 case "mdir":
@@ -338,14 +319,17 @@ public class laurie1 {
     }
     private static void printHelp() {
         System.out.println("\n=== Help Menu ===");
-        System.out.println("Welcome to the Utility Tool!");
-        System.out.println("You can perform the following tasks:");
-        System.out.println("- Create directories, read/write files, append text.");
-        System.out.println("- Search within files.");
-        System.out.println("- Generate random secure passwords.");
-        System.out.println("- Perform network lookups (whois, dig, host).");
-        System.out.println("- Calculate streaming service earnings based on number of streams.");
-        System.out.println("\nTip: You can view the source code of this tool to see how it works!");
-        System.out.println("Simply open the Java file and explore the classes and methods.\n");
-    }
-}
+            System.out.println("\n...Laurie...\n");
+            System.out.println("Create Directory (mdir)\n");
+            System.out.println("Read File (read)\n");
+            System.out.println("Write File (write)\n");
+            System.out.println("Append to File (append)\n");
+            System.out.println("Search in File (sfile)\n");
+            System.out.println("Generate Password (mkpasswd)\n");
+            System.out.println("Whois, dig, host (wdh)\n");
+            System.out.println("Streaming Earnings Calculator (strcalc)\n");
+            System.out.println("Help\n");
+            System.out.println("Exit\n");
+            System.out.print("Enter choice:");
+    };
+};
