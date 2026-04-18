@@ -2,366 +2,336 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
-#include <set>
-#include <map>
-#include <thread>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <deque>
 #include <mutex>
-#include <queue>
-#include <condition_variable>
+#include <thread>
 #include <chrono>
-#include <atomic>
-#include <cstring>
+#include <ctime>
+#include <algorithm>
 #include <cstdlib>
+#include <cstdio>
+#include <memory>
+#include <numeric>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <nlohmann/json.hpp>
-#include <sys/statvfs.h>
-#include <future>  // For async operations
-using json = nlohmann::json;
-// ================= CONFIG =================
+using namespace std;
+// Constants
 const int RATE_LIMIT_SECONDS = 60;
-const std::string BASELINE_FILE = "baseline.json";
-const std::string LOG_FILE = "/var/log/network_monitor.log";
-const size_t MAX_LOG_SIZE = 5 * 1024 * 1024;
-const double DISK_USAGE_THRESHOLD = 0.95;  // 95% disk usage
-// ================= THREAD POOL =================
-class ThreadPool {
-    std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool stop = false;
-public:
-    ThreadPool(size_t n) {
-        for (size_t i = 0; i < n; ++i) {
-            workers.emplace_back([this]() {
-                while (true) {
-                    std::function<void()> task;
-                    {
-                        std::unique_lock lock(mtx);
-                        cv.wait(lock, [this]() { return stop || !tasks.empty(); });
-                        if (stop && tasks.empty()) return;
-                        task = std::move(tasks.front());
-                        tasks.pop();
-                    }
-                    task();
-                }
-            });
-        }
-    }
-    void enqueue(std::function<void()> f) {
-        {
-            std::lock_guard lock(mtx);
-            tasks.push(f);
-        }
-        cv.notify_one();
-    }
-    void shutdown() {
-        {
-            std::lock_guard lock(mtx);
-            stop = true;
-        }
-        cv.notify_all();
-        for (auto &t : workers) t.join();
-    }
-};
-// ================= LOGGING =================
-std::mutex log_mtx;
-void rotate_logs() {
-    std::ifstream f(LOG_FILE, std::ios::binary | std::ios::ate);
-    if (!f) return;
-    if (f.tellg() < MAX_LOG_SIZE) return;
-    f.close();
-    std::rename(LOG_FILE.c_str(), (LOG_FILE + ".1").c_str());
+const int MAX_WORKERS = max(2u, thread::hardware_concurrency() * 2);
+const string BASELINE_FILE = "baseline.json";
+const size_t MAX_BASELINE_ENTRIES = 10000;
+const int FREQ_WINDOW = 60;
+const int FREQ_THRESHOLD = 20;
+const int BEACON_MIN_SAMPLES = 5;
+const double BEACON_VARIANCE_THRESHOLD = 2.0;
+unordered_set<int> SUSPICIOUS_PORTS = {4444, 5555, 6666, 1337, 9001};
+// ---------------- HELPERS ----------------
+bool is_ephemeral(int port) {
+    return port >= 32768 && port <= 60999;
 }
-void log_msg(const std::string &msg) {
-    std::lock_guard lock(log_mtx);
-    rotate_logs();
-    std::ofstream f(LOG_FILE, std::ios::app);
-    f << msg << std::endl;
+bool is_local_ip(const string& ip) {
+    return ip == "127.0.0.1" || ip == "::1" || ip.find("127.") == 0;
 }
-// ================= UTIL =================
-std::vector<std::string> split(const std::string &s) {
-    std::istringstream iss(s);
-    std::vector<std::string> v;
-    std::string x;
-    while (iss >> x) v.push_back(x);
-    return v;
+double now_time() {
+    return chrono::duration<double>(chrono::system_clock::now().time_since_epoch()).count();
 }
-std::vector<std::string> run_ss(const std::string &args) {
-    std::vector<std::string> lines;
-    std::string cmd = "ss " + args;
-    FILE *pipe = popen(cmd.c_str(), "r");
+vector<string> run_command(const string& cmd) {
+    vector<string> lines;
+    FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) return lines;
     char buffer[4096];
-    bool skip = true;
     while (fgets(buffer, sizeof(buffer), pipe)) {
-        if (skip) { skip = false; continue; }
-        std::string line(buffer);
-        if (!line.empty() && line.back() == '\n') line.pop_back();
-        lines.emplace_back(line);
+        lines.emplace_back(buffer);
     }
     pclose(pipe);
     return lines;
 }
-// ================= IP RANGE =================
-class CIDR {
-    in_addr net{};
-    in_addr mask{};
-public:
-    CIDR(const std::string &cidr) {
-        auto pos = cidr.find('/');
-        std::string ip = cidr.substr(0, pos);
-        int bits = std::stoi(cidr.substr(pos + 1));
-        inet_pton(AF_INET, ip.c_str(), &net.s_addr);
-        uint32_t m = bits == 0 ? 0 : htonl(~((1 << (32 - bits)) - 1));
-        mask.s_addr = m;
-    }
-    bool contains(const std::string &ip) const {
-        in_addr addr{};
-        if (inet_pton(AF_INET, ip.c_str(), &addr.s_addr) != 1)
-            return false;
-        return (addr.s_addr & mask.s_addr) == (net.s_addr & mask.s_addr);
-    }
-};
-// ================= PROCESS NAME =================
-std::string get_process_name(int pid) {
-    std::ifstream f("/proc/" + std::to_string(pid) + "/comm");
-    if (!f) return "unknown";
-    std::string name;
-    std::getline(f, name);
-    return name;
+string get_process_name(int pid) {
+    auto out = run_command("ps -p " + to_string(pid) + " -o comm= 2>/dev/null");
+    return out.empty() ? "unknown" : out[0];
 }
-// ================= ASYNCHRONOUS DISK SPACE CHECK =================
-std::future<bool> check_disk_space_async(const std::string& path = "/") {
-    return std::async(std::launch::async, [path]() {
-        struct statvfs stat;
-        if (statvfs(path.c_str(), &stat) != 0) {
-            std::cerr << "Failed to get disk space information for " << path << "\n";
-            return false;
-        }
-        unsigned long total_space = stat.f_blocks * stat.f_frsize;
-        unsigned long free_space = stat.f_bfree * stat.f_frsize;
-        double used_percentage = 1.0 - (static_cast<double>(free_space) / static_cast<double>(total_space));
-        if (used_percentage > DISK_USAGE_THRESHOLD) {
-            std::cerr << "Disk usage is above 95%. Terminating program.\n";
-            return false;  // Disk space is over the threshold
-        }
-        return true;  // Disk space is within safe limits
-    });
+string get_process_cmd(int pid) {
+    auto out = run_command("ps -p " + to_string(pid) + " -o args= 2>/dev/null");
+    return out.empty() ? "unknown" : out[0];
 }
-// ================= MAIN CLASS =================
+string get_process_exe(int pid) {
+    string path = "/proc/" + to_string(pid) + "/exe";
+    char buf[4096];
+    ssize_t len = readlink(path.c_str(), buf, sizeof(buf)-1);
+    if (len != -1) {
+        buf[len] = '\0';
+        return string(buf);
+    }
+    return "unknown";
+}
+// ---------------- CLASS ----------------
 class NetworkMonitor {
 public:
-    bool learn = false;
-    bool terminal = false;
-    std::set<int> allowed_ports{22,53,443,8080};
-    std::vector<CIDR> allowed_ranges;
-    std::map<std::string, std::vector<int>> allowed_processes;
-    std::set<std::string> baseline_conn;
-    std::set<std::string> baseline_proc;
-    std::vector<std::string> alerts;
-    std::map<std::string, time_t> cache;
-    std::mutex mtx;
-    NetworkMonitor() {
-        allowed_ranges.emplace_back("127.0.0.0/8");
-        allowed_ranges.emplace_back("192.168.1.0/24");
+    bool learn;
+    bool terminal_output;
+    string export_csv;
+    string export_json;
+    vector<tuple<double, string, string>> alerts;
+    unordered_map<string, double> alert_cache;
+    unordered_map<int, string> proc_cache;
+    mutex mtx;
+    unordered_set<int> ALLOWED_PORTS = {22, 53, 80, 443};
+    unordered_set<string> baseline_connections;
+    unordered_set<string> baseline_process_ports;
+    unordered_map<string, deque<double>> connection_history;
+    unordered_map<string, deque<double>> beacon_history;
+    NetworkMonitor(bool terminal=false,
+                   string config_path="",
+                   bool learn_mode=false,
+                   string csv="",
+                   string json="")
+        : terminal_output(terminal),
+          learn(learn_mode),
+          export_csv(csv),
+          export_json(json)
+    {
         load_baseline();
     }
-    void load_config(const std::string &path) {
-        std::ifstream f(path);
-        if (!f) return;
-        json j; f >> j;
-        if (j.contains("ports") && j["ports"].is_array()) {
-            for (auto &p : j["ports"])
-                if (p.is_number_integer())
-                    allowed_ports.insert(p.get<int>());
-        }
-        if (j.contains("ip_ranges") && j["ip_ranges"].is_array()) {
-            for (auto &r : j["ip_ranges"])
-                if (r.is_string())
-                    allowed_ranges.emplace_back(r.get<std::string>());
-        }
-        if (j.contains("processes") && j["processes"].is_object()) {
-            for (auto &[k, v] : j["processes"].items()) {
-                if (v.is_array()) {
-                    std::vector<int> ports;
-                    for (auto &p : v)
-                        if (p.is_number_integer())
-                            ports.push_back(p.get<int>());
-                    allowed_processes[k] = ports;
-                }
-            }
-        }
-    }
     void load_baseline() {
-        std::ifstream f(BASELINE_FILE);
-        if (!f) return;
-        json j; f >> j;
-        if (j.contains("connections") && j["connections"].is_array()) {
-            for (auto &x : j["connections"])
-                if (x.is_string())
-                    baseline_conn.insert(x.get<std::string>());
-        }
-        if (j.contains("process_ports") && j["process_ports"].is_array()) {
-            for (auto &x : j["process_ports"])
-                if (x.is_string())
-                    baseline_proc.insert(x.get<std::string>());
-        }
+        ifstream f(BASELINE_FILE);
+        if (!f.is_open()) return;
+        string line;
+        while (getline(f, line)) {}
     }
     void save_baseline() {
-        json j;
-        j["connections"] = baseline_conn;
-        j["process_ports"] = baseline_proc;
-        std::ofstream f(BASELINE_FILE);
-        f << j.dump(2);
+        ofstream f(BASELINE_FILE);
+        f << "{\n";
+
+        f << "\"connections\": [\n";
+        int count = 0;
+        for (const auto& c : baseline_connections) {
+            if (count++ >= MAX_BASELINE_ENTRIES) break;
+            f << "\"" << c << "\",\n";
+        }
+        f << "],\n";
+
+        f << "\"process_ports\": [\n";
+        count = 0;
+        for (const auto& p : baseline_process_ports) {
+            if (count++ >= MAX_BASELINE_ENTRIES) break;
+            f << "\"" << p << "\",\n";
+        }
+        f << "]\n}\n";
     }
-    bool allowed_ip(const std::string &ip) {
-        for (auto &r : allowed_ranges)
-            if (r.contains(ip)) return true;
+    bool rate_limited(const string& key) {
+        double now = now_time();
+        lock_guard<mutex> lock(mtx);
+        if (alert_cache.count(key)) {
+            if (now - alert_cache[key] < RATE_LIMIT_SECONDS)
+                return true;
+        }
+        alert_cache[key] = now;
         return false;
     }
-    bool rate_limited(const std::string &k) {
-        time_t now = time(nullptr);
-        if (cache.count(k) && now - cache[k] < RATE_LIMIT_SECONDS)
-            return true;
-        cache[k] = now;
-        return false;
+    void record_alert(const string& type,
+                      const string& msg,
+                      const string& key,
+                      const string& context = "UNKNOWN") {
+
+        if (rate_limited(key)) return;
+        string full = "[" + context + "] " + msg;
+        {
+            lock_guard<mutex> lock(mtx);
+            alerts.emplace_back(now_time(), type, full);
+        }
+        cout << full << endl;
     }
-    void process_conn(const std::string &line) {
-        auto c = split(line);
-        if (c.size() < 5) return;
-        auto pos = c[4].rfind(':');
-        if (pos == std::string::npos) return;
-        std::string ip = c[4].substr(0,pos);
-        std::string port_str = c[4].substr(pos+1);
-        if (!std::all_of(port_str.begin(), port_str.end(), ::isdigit)) return;
-        int port = std::stoi(port_str);
-        std::string key = c[0] + ":" + ip + ":" + std::to_string(port);
+    void process_connection(const string& line) {
+        istringstream iss(line);
+        vector<string> cols;
+        string temp;
+        while (iss >> temp) cols.push_back(temp);
+        if (cols.size() < 5) return;
+        string proto = cols[0];
+        string dest = cols[4];
+        auto pos = dest.rfind(':');
+        if (pos == string::npos) return;
+        string ip = dest.substr(0, pos);
+        string port_str = dest.substr(pos + 1);
+        if (!all_of(port_str.begin(), port_str.end(), ::isdigit)) return;
+        int port = stoi(port_str);
+        string key = proto + ":" + ip + ":" + to_string(port);
+        double now = now_time();
+        if (is_local_ip(ip) || is_ephemeral(port)) return;
         if (learn) {
-            baseline_conn.insert(key);
+            lock_guard<mutex> lock(mtx);
+            if (baseline_connections.size() < MAX_BASELINE_ENTRIES)
+                baseline_connections.insert(key);
             return;
         }
-        if (baseline_conn.count(key)) return;
-        if (!allowed_ports.count(port) && !allowed_ip(ip)) {
-            if (rate_limited(key)) return;
-            std::string msg = "Unusual outbound connection " + key;
-            std::lock_guard lock(mtx);
-            alerts.push_back(msg);
-            log_msg(msg);
-            if (terminal) std::cout << msg << "\n";
+        if (!baseline_connections.count(key)) {
+            record_alert("first_seen",
+                         "New external connection " + key,
+                         key,
+                         "NET");
         }
-    }
-    void process_proc(const std::string &line) {
-        if (line.find("pid=") == std::string::npos) return;
-        auto c = split(line);
-        if (c.size() < 5) return;
-        size_t start = line.find("pid=") + 4;
-        size_t end = line.find(',', start);
-        std::string pid_str = (end == std::string::npos)
-            ? line.substr(start)
-            : line.substr(start, end - start);
-        int pid = 0;
-        try { pid = std::stoi(pid_str); }
-        catch (...) { return; }
-        std::string pname = get_process_name(pid);
-        auto pos = c[4].rfind(':');
-        if (pos == std::string::npos) return;
-        std::string port_str = c[4].substr(pos+1);
-        if (!std::all_of(port_str.begin(), port_str.end(), ::isdigit)) return;
-        int port = std::stoi(port_str);
-        std::string key = pname + ":" + std::to_string(port);
-        if (learn) {
-            baseline_proc.insert(key);
-            return;
+        auto& hist = connection_history[key];
+        hist.push_back(now);
+        while (!hist.empty() && now - hist.front() > FREQ_WINDOW)
+            hist.pop_front();
+        if ((int)hist.size() > FREQ_THRESHOLD) {
+            record_alert("frequency",
+                         "High frequency " + key,
+                         key,
+                         "NET");
         }
-        if (baseline_proc.count(key)) return;
-        auto allowed = allowed_processes[pname];
-        if (std::find(allowed.begin(), allowed.end(), port) == allowed.end()
-            && !allowed_ports.count(port)) {
-            if (rate_limited(key)) return;
-            std::string msg = "Process " + pname +
-                " (PID " + std::to_string(pid) + ") using port " + std::to_string(port);
-            std::lock_guard lock(mtx);
-            alerts.push_back(msg);
-            log_msg(msg);
-            if (terminal) std::cout << msg << "\n";
-        }
-    }
-    void run(bool continuous, bool once, int duration) {
-        if (geteuid() != 0) {
-            std::cerr << "Must run as root\n";
-            return;
-        }
-        auto disk_space_check = check_disk_space_async();  // Start the async disk check
-        if (disk_space_check.get() == false) {  // Wait for async result and terminate if disk space is too high
-            std::cerr << "Disk space usage is over the threshold. Terminating program.\n";
-            return;  // Exit if disk usage exceeds threshold
-        }
-        ThreadPool pool(std::thread::hardware_concurrency()*2);
-        auto scan = [this, &pool]() {
-            for (auto &l : run_ss("-tun"))
-                pool.enqueue([this, l]{ process_conn(l); });
-            for (auto &l : run_ss("-tunp"))
-                pool.enqueue([this, l]{ process_proc(l); });
-        };
-        auto start = std::chrono::steady_clock::now();
-        if (once) {
-            scan();
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            print();
-            if (learn) save_baseline();
-            pool.shutdown();
-            return;
-        }
-        do {
-            scan();
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            if (duration > 0) {
-                auto now = std::chrono::steady_clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now-start).count() >= duration)
-                    break;
-            }
-        } while (continuous);
-        if (learn) save_baseline();
-        pool.shutdown();
-    }
-    void print() {
-        if (alerts.empty()) {
-            std::cout << "No alerts\n";
-            return;
-        }
-        for (size_t i=0;i<alerts.size();++i)
-            std::cout << i+1 << ". " << alerts[i] << "\n";
     }
 };
-void print_help() {
-    std::cout << "Usage: portpeep [options]\n";
-    std::cout << "Options:\n";
-    std::cout << "  -h, --help                Show this help message\n";
-    std::cout << "  --continuous              Run continuously (poll every 10 seconds)\n";
-    std::cout << "  --once                    Run one-time scan and display results immediately\n";
-    std::cout << "  --learn                   Learn baseline instead of alerting\n";
-    std::cout << "  --terminal                Also log alerts to the terminal\n";
-    std::cout << "  --config <path>           Path to JSON config file\n";
-    std::cout << "  --duration <seconds>      Run for N seconds before exiting (continuous only)\n";
+// ---------------- PROCESS ----------------
+void process_process(const string& line, NetworkMonitor& nm) {
+    if (line.find("pid=") == string::npos) return;
+    size_t pid_pos = line.find("pid=");
+    size_t comma = line.find(",", pid_pos);
+    int pid = stoi(line.substr(pid_pos + 4, comma - (pid_pos + 4)));
+    string pname;
+    {
+        lock_guard<mutex> lock(nm.mtx);
+        if (nm.proc_cache.count(pid)) {
+            pname = nm.proc_cache[pid];
+        } else {
+            pname = get_process_name(pid);
+            nm.proc_cache[pid] = pname;
+        }
+    }
+    istringstream iss(line);
+    vector<string> cols;
+    string temp;
+    while (iss >> temp) cols.push_back(temp);
+    if (cols.size() < 5) return;
+    string dest = cols[4];
+    auto pos = dest.rfind(':');
+    if (pos == string::npos) return;
+    string port_str = dest.substr(pos + 1);
+    if (!all_of(port_str.begin(), port_str.end(), ::isdigit)) return;
+    int port = stoi(port_str);
+    if (is_ephemeral(port)) return;
+    string key = pname + ":" + to_string(port);
+    if (nm.learn) {
+        lock_guard<mutex> lock(nm.mtx);
+        if (nm.baseline_process_ports.size() < MAX_BASELINE_ENTRIES)
+            nm.baseline_process_ports.insert(key);
+        return;
+    }
+    string cmd = get_process_cmd(pid);
+    string exe = get_process_exe(pid);
+    if (SUSPICIOUS_PORTS.count(port)) {
+        nm.record_alert("suspicious_port",
+            "Process [" + pname + "] (PID " + to_string(pid) +
+            ") using suspicious port " + to_string(port) +
+            "\n  CMD: " + cmd +
+            "\n  EXE: " + exe,
+            key,
+            "PROCESS");
+    }
+    if (!nm.baseline_process_ports.count(key)) {
+        nm.record_alert("process_anomaly",
+            "Process [" + pname + "] (PID " + to_string(pid) +
+            ") unusual port " + to_string(port) +
+            "\n  CMD: " + cmd +
+            "\n  EXE: " + exe,
+            key,
+            "PROCESS");
+    }
 }
+// ---------------- RUN + MAIN (unchanged) ----------------
+void run_monitor(NetworkMonitor& nm,
+                 bool continuous,
+                 bool once,
+                 int duration) {
+    auto once_scan = [&nm]() {
+        vector<string> conns = run_command("ss -tunH");
+        vector<string> procs = run_command("ss -tunpH");
+        if (conns.size() < 100) {
+            for (auto& l : conns)
+                nm.process_connection(l);
+            for (auto& l : procs)
+                process_process(l, nm);
+        } else {
+            vector<thread> workers;
+            for (auto& l : conns) {
+                workers.emplace_back([&nm, l]() {
+                    nm.process_connection(l);
+                });
+            }
+            for (auto& l : procs) {
+                workers.emplace_back([&nm, l]() {
+                    process_process(l, nm);
+                });
+            }
+            for (auto& t : workers)
+                t.join();
+        }
+    };
+    double start_time = now_time();
+    if (once) {
+        once_scan();
+        return;
+    }
+    if (continuous) {
+        while (true) {
+            once_scan();
+            if (duration > 0 && (now_time() - start_time) >= duration)
+                break;
+            this_thread::sleep_for(chrono::seconds(10));
+        }
+    } else {
+        once_scan();
+    }
+    if (nm.learn) nm.save_baseline();
+    if (!nm.export_csv.empty()) {
+        ofstream f(nm.export_csv);
+        for (auto& [ts, typ, msg] : nm.alerts)
+            f << ts << "," << typ << "," << msg << "\n";
+    }
+    if (!nm.export_json.empty()) {
+        ofstream f(nm.export_json);
+        f << "[\n";
+        for (auto& [ts, typ, msg] : nm.alerts) {
+            f << "{ \"ts\": " << ts
+              << ", \"type\": \"" << typ
+              << "\", \"msg\": \"" << msg << "\" },\n";
+        }
+        f << "]\n";
+    }
+}
+// ---------------- MAIN ----------------
 int main(int argc, char* argv[]) {
-    if (argc == 2 && (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help")) {
-        print_help();
+    bool continuous = false;
+    bool once = false;
+    bool learn = false;
+    bool terminal = false;
+    int duration = 0;
+    string export_csv;
+    string export_json;
+    for (int i = 1; i < argc; i++) {
+        string arg = argv[i];
+        if (arg == "-c" || arg == "--continuous")
+            continuous = true;
+        else if (arg == "--once")
+            once = true;
+        else if (arg == "--learn")
+            learn = true;
+        else if (arg == "--terminal")
+            terminal = true;
+        else if (arg == "--duration" && i + 1 < argc)
+            duration = stoi(argv[++i]);
+        else if (arg == "--export-csv" && i + 1 < argc)
+            export_csv = argv[++i];
+        else if (arg == "--export-json" && i + 1 < argc)
+            export_json = argv[++i];
+    }
+    NetworkMonitor nm(terminal, "", learn, export_csv, export_json);
+    try {
+        run_monitor(nm, continuous, once, duration);
+    } catch (...) {
         return 0;
     }
-    NetworkMonitor nm;
-    bool continuous=false, once=false;
-    int duration=0;
-    for (int i=1;i<argc;++i) {
-        std::string a = argv[i];
-        if (a=="--continuous") continuous=true;
-        else if (a=="--once") once=true;
-        else if (a=="--learn") nm.learn=true;
-        else if (a=="--terminal") nm.terminal=true;
-        else if (a=="--config" && i+1<argc) nm.load_config(argv[++i]);
-        else if (a=="--duration" && i+1<argc) duration=std::stoi(argv[++i]);
-    }
-    nm.run(continuous, once, duration);
+    return 0;
 }
