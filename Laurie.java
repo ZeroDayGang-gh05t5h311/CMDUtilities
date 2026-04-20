@@ -10,8 +10,12 @@ import java.security.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.logging.*;
-public class Laurie {
-    private static final Logger logger = Logger.getLogger(laurie1.class.getName());
+import java.nio.file.attribute.*;
+import java.util.logging.*;
+import java.util.stream.*;
+public class Laurie3 {
+    private static final Logger logger = Logger.getLogger(Laurie3.class.getName());
+    private static final String OS = System.getProperty("os.name").toLowerCase();
     static class SafeCalc {
         private static final Map<Class<?>, BiFunction<Double, Double, Double>> OPS = new HashMap<>();
         static {
@@ -55,86 +59,89 @@ public class Laurie {
             }
         }
     }
-    class ast {
-    static class Add {}
-    static class Sub {}
-    static class Mult {}
-    static class Div {}
-    static class Mod {}
-    static class Pow {}
-    static class FloorDiv {}
-    static class USub {}
-    static class UAdd {}
-    static class BinOp {
-        private Object left;
-        private Object right;
-        private Object operator;
-        public BinOp(Object left, Object right, Object operator) {
-            this.left = left;
-            this.right = right;
-            this.operator = operator;
+    static class ast {
+        static class Add {}
+        static class Sub {}
+        static class Mult {}
+        static class Div {}
+        static class Mod {}
+        static class Pow {}
+        static class FloorDiv {}
+        static class USub {}
+        static class UAdd {}
+        static class BinOp {
+            private Object left;
+            private Object right;
+            private Object operator;
+            public BinOp(Object left, Object right, Object operator) {
+                this.left = left;
+                this.right = right;
+                this.operator = operator;
+            }
+            public Object getLeft() {
+                return left;
+            }
+            public Object getRight() {
+                return right;
+            }
+            public Object getOperator() {
+                return operator;
+            }
         }
-        public Object getLeft() {
-            return left;
-        }
-        public Object getRight() {
-            return right;
-        }
-        public Object getOperator() {
-            return operator;
-        }
-    }
-    static class UnaryOp {
-        private Object operand;
-        private Object operator;
-        public UnaryOp(Object operand, Object operator) {
-            this.operand = operand;
-            this.operator = operator;
-        }
-        public Object getOperand() {
-            return operand;
-        }
-        public Object getOperator() {
-            return operator;
-        }
-    }
-    static class Num {
-        private double value;
+        static class UnaryOp {
+            private Object operand;
+            private Object operator;
 
-        public Num(double value) {
-            this.value = value;
+            public UnaryOp(Object operand, Object operator) {
+                this.operand = operand;
+                this.operator = operator;
+            }
+            public Object getOperand() {
+                return operand;
+            }
+            public Object getOperator() {
+                return operator;
+            }
         }
-
-        public double getValue() {
-            return value;
+        static class Num {
+            private double value;
+            public Num(double value) {
+                this.value = value;
+            }
+            public double getValue() {
+                return value;
+            }
+        }
+        static class Constant {
+            private double value;
+            public Constant(double value) {
+                this.value = value;
+            }
+            public double getValue() {
+                return value;
+            }
+        }
+        public static Object parse(String expr) {
+            // Placeholder for expression parsing, which would return a number
+            return new Num(10);  // Temporary placeholder for simplicity
         }
     }
-    static class Constant {
-        private double value;
-        public Constant(double value) {
-            this.value = value;
-        }
-        public double getValue() {
-            return value;
-        }
-    }
-    public static Object parse(String expr) {
-        // Here you should implement the logic to parse a mathematical expression
-        // For simplicity, let's just return a constant for now
-        return new Num(10);  // Placeholder
-    }
-}
-    static class Tool {
-        public static String getInput(String prompt) {
+        static class Tool {
+            public static String getInput(String prompt) {
             Scanner sc = new Scanner(System.in);
             System.out.print(prompt);
             String input = sc.nextLine();
-            // Sanitize input to prevent injection
             return input.trim();
         }
         public static String cmd(String cmd) {
             try {
-                Process process = new ProcessBuilder(cmd.split(" ")).start();
+                ProcessBuilder processBuilder;
+                if (OS.contains("win")) {
+                    processBuilder = new ProcessBuilder("cmd", "/c", cmd); // Windows
+                } else {
+                    processBuilder = new ProcessBuilder(cmd.split(" ")); // Unix-like systems
+                }
+                Process process = processBuilder.start();
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 StringBuilder output = new StringBuilder();
                 String line;
@@ -150,16 +157,25 @@ public class Laurie {
         public static void mdir() {
             try {
                 String dirName = getInput("Directory name: ");
-                cmd("mkdir -p " + dirName);
-                System.out.println("Directory created: " + dirName);
+                // Cross-platform directory creation
+                File dir = new File(dirName);
+                if (!dir.exists()) {
+                    boolean created = dir.mkdirs();
+                    if (created) {
+                        System.out.println("Directory created: " + dirName);
+                    } else {
+                        System.out.println("Failed to create directory.");
+                    }
+                } else {
+                    System.out.println("Directory already exists: " + dirName);
+                }
             } catch (Exception e) {
                 logger.severe("Failed to create directory: " + e.getMessage());
                 System.out.println("Error creating directory.");
             }
         }
         public static void read(String filename) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(filename));
+            try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     System.out.println(line);
@@ -198,7 +214,9 @@ public class Laurie {
         }
         public static void sfile(String filename, String search) {
             try {
-                Process process = new ProcessBuilder("grep", "-i", search, filename).start();
+                // Cross-platform search command: 'grep' for Linux/macOS, 'findstr' for Windows
+                String searchCommand = OS.contains("win") ? "findstr /i " + search : "grep -i " + search;
+                Process process = new ProcessBuilder(searchCommand.split(" ")).start();
                 process.waitFor();
             } catch (IOException | InterruptedException e) {
                 logger.warning("Error searching file: " + e.getMessage());
@@ -274,7 +292,67 @@ public class Laurie {
                 System.out.println("Invalid input for streams.");
             }
         }
-    }
+
+         public static void mapDirectory(String dirPath) {
+            try {
+                Path startPath = Paths.get(dirPath);
+                if (!Files.exists(startPath) || !Files.isDirectory(startPath)) {
+                    System.out.println("The specified path does not exist or is not a directory.");
+                    return;
+                }
+                // Walk through the directory tree and print out the structure
+                Files.walkFileTree(startPath, new SimpleFileVisitor<Path>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                        String indent = getIndentation(dir, startPath);
+                        System.out.println(indent + "[DIR] " + dir.getFileName());
+                        return FileVisitResult.CONTINUE;
+                    }
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                        String indent = getIndentation(file.getParent(), startPath);
+                        System.out.println(indent + "[FILE] " + file.getFileName());
+                        return FileVisitResult.CONTINUE;
+                    }
+                    @Override
+                    public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                        logger.warning("Error visiting file: " + exc.getMessage());
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+            } catch (IOException e) {
+                logger.warning("Error mapping directory: " + e.getMessage());
+                System.out.println("Error mapping directory.");
+            }
+        }
+        private static String getIndentation(Path path, Path startPath) {
+            int depth = path.getNameCount() - startPath.getNameCount();
+            StringBuilder indent = new StringBuilder();
+            for (int i = 0; i < depth; i++) {
+                indent.append("  ");
+            }
+            return indent.toString();
+            }
+        }
+        public static void evalExpression() {
+            try {
+                String expr = Tool.getInput("Enter a mathematical expression (e.g., 3 + 5): ");
+                double result = SafeCalc.evalExpr(expr);
+                System.out.println("Result: " + result);
+                } catch (Exception e) {
+                    System.out.println("Error evaluating expression: " + e.getMessage());
+                }
+            }
+        public static void parseAndEvaluateExpression() {
+            try {
+                String expr = Tool.getInput("Enter a simple mathematical expression to parse (e.g., 3 + 5): ");
+                Object parsedExpr = ast.parse(expr);
+                double result = SafeCalc.evalExpr(parsedExpr.toString()); // Uses SafeCalc to evaluate
+                System.out.println("Parsed and Evaluated Result: " + result);
+            } catch (Exception e) {
+                System.out.println("Error parsing or evaluating expression: " + e.getMessage());
+            }
+        }
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         String choice = "";
@@ -282,6 +360,12 @@ public class Laurie {
         while (!choice.equals("exit")) {
             choice = sc.nextLine();
             switch (choice) {
+                case "eval":
+                    evalExpression();
+                    break;
+                case "parseeval":
+                    parseAndEvaluateExpression();
+                    break;
                 case "mdir":
                     Tool.mdir();
                     break;
@@ -306,6 +390,9 @@ public class Laurie {
                 case "strcalc":
                     Tool.strcalc();
                     break;
+                case "mapdir":
+                    Tool.mapDirectory(Tool.getInput("Enter directory path to map: "));
+                    break;
                 case "help":
                     printHelp();
                     break;
@@ -319,17 +406,20 @@ public class Laurie {
     }
     private static void printHelp() {
         System.out.println("\n=== Help Menu ===");
-            System.out.println("\n...Laurie...\n");
-            System.out.println("Create Directory (mdir)\n");
-            System.out.println("Read File (read)\n");
-            System.out.println("Write File (write)\n");
-            System.out.println("Append to File (append)\n");
-            System.out.println("Search in File (sfile)\n");
-            System.out.println("Generate Password (mkpasswd)\n");
-            System.out.println("Whois, dig, host (wdh)\n");
-            System.out.println("Streaming Earnings Calculator (strcalc)\n");
-            System.out.println("Help\n");
-            System.out.println("Exit\n");
-            System.out.print("Enter choice:");
-    };
-};
+        System.out.println("\n...Laurie...\n");
+        System.out.println("Evaluate Expression (eval)\n");
+        System.out.println("Parse and Evaluate Expression (parseeval)\n");
+        System.out.println("Create Directory (mdir)\n");
+        System.out.println("Read File (read)\n");
+        System.out.println("Write File (write)\n");
+        System.out.println("Append to File (append)\n");
+        System.out.println("Search in File (sfile)\n");
+        System.out.println("Generate Password (mkpasswd)\n");
+        System.out.println("Whois, dig, host (wdh)\n");
+        System.out.println("Streaming Earnings Calculator (strcalc)\n");
+        System.out.println("Map Directory Structure (mapdir)\n");  // New option
+        System.out.println("Help\n");
+        System.out.println("Exit\n");
+        System.out.print("Enter choice:");
+    }
+}
