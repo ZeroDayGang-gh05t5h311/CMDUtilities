@@ -1,26 +1,19 @@
 #!/usr/bin/python3
 """
-h3ktic_report.py
-Linux system compromise checker for novice users with scoring, risk classification, detailed follow-up steps,
-and prioritization recommendations.
-Outputs a human-readable report in the current directory.
+h3ktic_report.oy
+Multi Platform System compromise checker: with scoring and detailed follow-up instructions.
+Outputs a human-readable report in the current directory with clear explanations, warnings, and next steps.
 """
 import os
 import subprocess
 import platform
-import json
 from datetime import datetime
-import argparse
 # ANSI color codes for terminal highlighting
 RED = "\033[91m"
 YELLOW = "\033[93m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 TOTAL_SCORE = 0  # cumulative suspiciousness score
-# Command-line argument parsing for output format
-parser = argparse.ArgumentParser(description="Run a system compromise check with output in text or JSON format.")
-parser.add_argument('--output', choices=['text', 'json'], default='text', help="Choose output format: 'text' or 'json'.")
-args = parser.parse_args()
 def get_report_filename():
     """Generate a unique report filename to avoid duplicates."""
     base_name = f"compromise_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -32,22 +25,20 @@ def get_report_filename():
     return filename
 REPORT_FILE = get_report_filename()
 def write_report(text, color=None):
-    if args.output == 'text':
-        if color:
-            print(color + text + RESET)
-        else:
-            print(text)
-        with open(REPORT_FILE, "a") as f:
-            f.write(text + "\n")
-    elif args.output == 'json':
-        return text 
-
+    """Write text to report file and optionally colorize in terminal."""
+    if color:
+        print(color + text + RESET)
+    else:
+        print(text)
+    with open(REPORT_FILE, "a") as f:
+        f.write(text + "\n")
 def section(title):
-    section_text = "\n" + "=" * 80 + f"\n=== {title} ===\n" + "=" * 80 + "\n"
-    write_report(section_text)
-    return section_text
-
+    """Write a formatted section header."""
+    write_report("\n" + "=" * 80)
+    write_report(f"=== {title} ===")
+    write_report("=" * 80 + "\n")
 def run_cmd(cmd, explanation=None, warning=None):
+    """Run a shell command with optional explanation and warnings. Returns count of output lines."""
     if explanation:
         write_report(f"INFO: {explanation}\n")
     try:
@@ -131,41 +122,42 @@ def follow_up_instructions(section_name):
     }
     return instructions.get(section_name, [])
 def check_section(name, cmd, explanation, warning):
+    """Check a section and return its score."""
     count = run_cmd(cmd, explanation, warning)
     score = score_section(count)
     color = YELLOW if score > 0 else GREEN
-    score_text = f"{name} Score: {score}/10\n"
-    write_report(score_text, color)
+    write_report(f"{name} Score: {score}/10\n", color)
+    # Add follow-up instructions
     instructions = follow_up_instructions(name)
     if instructions:
         write_report("Follow-up Investigation Steps:", YELLOW)
         for step in instructions:
             write_report(f" - {step}")
-    return score_text, score
+    write_report("")  # empty line
+    return score
+
 def get_system_info():
+    """Detect the current operating system and adjust commands."""
     current_os = platform.system().lower()
     return current_os
+
 def main():
     global TOTAL_SCORE
     system_type = get_system_info()
-    report_data = {
-        "sections": [],
-        "total_score": 0,
-        "risk_level": "",
-    }
-    section_data = section("Enhanced System Compromise Check - Beginner Friendly")
-    report_data["sections"].append({"section": "Intro", "content": section_data})
-    # Populate sections (Linux, macOS, Windows checks)
+    
+    section("Enhanced System Compromise Check - Beginner Friendly")
+    write_report(f"Report generated on: {datetime.now()}")
+    write_report(f"Hostname: {os.uname().nodename}\n")
+    write_report("NOTE: Warnings in red indicate areas that may require further investigation.\n")
+    
     if system_type == 'linux':
-        section_data, score = check_section(
+        TOTAL_SCORE += check_section(
             "Suspicious Processes",
             "ps aux | awk '$11 ~ /^\\/tmp|^\\/var\\/tmp|^\\/dev\\/shm|/^\\..+/'",
             "Processes running from unusual or hidden directories may be malicious.",
             "Processes found here may indicate a compromise!"
         )
-        report_data["sections"].append({"section": "Suspicious Processes", "content": section_data})
-        TOTAL_SCORE += score
-        section_data, score = check_section(
+        TOTAL_SCORE += check_section(
             "Hidden Files",
             "find /tmp /var/tmp /home /root -type f -name '.*'",
             "Hidden files may be used to hide malicious scripts or configuration files.",
@@ -283,10 +275,8 @@ def main():
             "Check scheduled tasks for unusual entries.",
             "Suspicious scheduled tasks found!"
         )
-        report_data["sections"].append({"section": "Hidden Files", "content": section_data})
-        TOTAL_SCORE += score
     # Risk classification based on total score
-    section_data = section("System Risk Classification")
+    section("System Risk Classification")
     if TOTAL_SCORE < 20:
         risk = "Low Risk"
         color = GREEN
@@ -296,14 +286,9 @@ def main():
     else:
         risk = "High Risk"
         color = RED
-    report_data["total_score"] = TOTAL_SCORE
-    report_data["risk_level"] = risk
-    risk_text = f"TOTAL SUSPICIOUSNESS SCORE: {TOTAL_SCORE}/80\nSYSTEM RISK LEVEL: {risk}\n"
-    write_report(risk_text, color)
-    if args.output == 'text':
-        write_report(f"Report saved to {os.path.abspath(REPORT_FILE)}")
-        write_report("Review each section carefully and follow the investigation steps provided.")
-    elif args.output == 'json':
-        print(json.dumps(report_data, indent=4))
+    write_report(f"TOTAL SUSPICIOUSNESS SCORE: {TOTAL_SCORE}/80", color)
+    write_report(f"SYSTEM RISK LEVEL: {risk}", color)
+    write_report(f"Report saved to {os.path.abspath(REPORT_FILE)}")
+    write_report("Review each section carefully and follow the investigation steps provided.")
 if __name__ == "__main__":
     main()
