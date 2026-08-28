@@ -1,422 +1,424 @@
 #include <iostream>
 #include <string>
 #include <memory>
-#include <cstdlib>
 #include <fstream>
 #include <ctime>
 #include <thread>
 #include <mutex>
 #include <stdexcept>
-using namespace std; 
-mutex logMutex;         
-//To prevent race conditions when logging from multiple threads
-//Utility function for logging
-void logMessage(const string& category, const string& message) {
-    lock_guard<mutex> guard(logMutex); // Thread-safe logging
-    ofstream logFile("update_log.txt", ios::app);
-    if (!logFile) {
-        cerr << "Error opening log file!" << endl;
+#include <vector>
+#include <sstream>
+#include <array>
+#include <filesystem>
+#include <cstdio>
+#include <cstdlib>
+#include <algorithm>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+using namespace std;
+namespace fs=std::filesystem;
+mutex logMutex;
+string logFilename="update_log.txt";
+bool dryRun=false;
+bool firmwareMode=false;
+void logMessage(const string& category,const string& message){
+    lock_guard<mutex> guard(logMutex);
+    ofstream logFile(logFilename,ios::app);
+    if(!logFile){
+        cerr<<"Error opening log file!"<<endl;
         return;
     }
-    time_t now = time(nullptr);
-    char timeStr[100];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    logFile << "[" << timeStr << "] [" << category << "] " << message << endl;
+    time_t now=time(nullptr);
+    char timeStr[100]{};
+    tm timeInfo{};
+#ifdef _WIN32
+    localtime_s(&timeInfo,&now);
+#else
+    localtime_r(&now,&timeInfo);
+#endif
+    strftime(timeStr,sizeof(timeStr),"%Y-%m-%d %H:%M:%S",&timeInfo);
+    logFile<<"["<<timeStr<<"] ["<<category<<"] "<<message<<endl;
 }
-// Utility function to check if a command exists
-bool commandExists(const string& cmd) {
-    return system((cmd + " --version > /dev/null 2>&1").c_str()) == 0;
+struct CommandResult{
+    int exitCode;
+    string output;
+};
+CommandResult executeCommand(const string& command){
+    CommandResult result{};
+    if(dryRun){
+        result.exitCode=0;
+        result.output="DRY-RUN: "+command;
+        return result;
+    }
+    array<char,256> buffer{};
+    string output;
+#ifdef _WIN32
+    string shellCommand="cmd /C "+command+" 2>&1";
+#else
+    string shellCommand=command+" 2>&1";
+#endif
+    FILE* pipe=popen(shellCommand.c_str(),"r");
+    if(!pipe){
+        result.exitCode=-1;
+        result.output="Failed to execute command";
+        return result;
+    }
+    while(fgets(buffer.data(),buffer.size(),pipe)!=nullptr){
+        output+=buffer.data();
+    }
+    result.exitCode=pclose(pipe);
+    result.output=output;
+    return result;
 }
-class OSUpdater {
+bool runCommand(const string& category,const string& command){
+    logMessage(category,"Executing: "+command);
+    CommandResult result=executeCommand(command);
+    if(!result.output.empty()){
+        logMessage(category,result.output);
+    }
+    if(result.exitCode!=0){
+        logMessage("ERROR","Command failed: "+to_string(result.exitCode));
+        return false;
+    }
+    return true;
+}
+bool commandExists(const string& command){
+#ifdef _WIN32
+    string test="where "+command+" > nul 2>&1";
+#else
+    string test="command -v "+command+" > /dev/null 2>&1";
+#endif
+    return system(test.c_str())==0;
+}
+bool fileExists(const string& path){
+    try{
+        return fs::exists(path);
+    }
+    catch(...){
+        return false;
+    }
+}
+string trimQuotes(const string& value){
+    if(value.size()>1&&value.front()=='"'&&value.back()=='"'){
+        return value.substr(1,value.size()-2);
+    }
+    return value;
+}
+bool isRoot(){
+#ifdef _WIN32
+    return false;
+#else
+    return geteuid()==0;
+#endif
+}
+class OSUpdater{
 public:
-    virtual void checkForUpdates() = 0;
-    virtual void performUpdate() = 0;
-    virtual void handleDependencies() = 0;
-    virtual void updateFirmware() = 0;
-    virtual void updateCache() = 0;
-    virtual void gatherSystemInfo() = 0;
-    virtual ~OSUpdater() {}
+    virtual ~OSUpdater()=default;
+    virtual void checkForUpdates()=0;
+    virtual void performUpdate()=0;
+    virtual void handleDependencies()=0;
+    virtual void updateFirmware()=0;
+    virtual void updateCache()=0;
+    virtual void gatherSystemInfo()=0;
 };
-class OSXUpdater : public OSUpdater {
-public:
-    void checkForUpdates() override {
-        log("Checking for updates on macOS...");
-        if (system("softwareupdate -l") != 0) {
-            log("Failed to check for updates on macOS.");
-        }
-    }
-    void performUpdate() override {
-        log("Performing macOS update...");
-        if (system("softwareupdate --install --all") != 0) {
-            log("Failed to perform macOS update.");
-        }
-    }
-    void handleDependencies() override {
-        log("Handling macOS dependencies...");
-        if (system("brew update && brew upgrade") != 0) {
-            log("Failed to handle dependencies on macOS.");
-        }
-    }
-    void updateFirmware() override {
-        log("Updating firmware on macOS...");
-        if (system("softwareupdate --fetch-full-installer") != 0) {
-            log("Failed to update firmware on macOS.");
-        }
-        if (system("softwareupdate --install --all") != 0) {
-            log("Failed to install macOS firmware.");
-        }
-    }
-    void updateCache() override {
-        log("Updating cache on macOS...");
-        if (system("softwareupdate --fetch-full-installer") != 0) {
-            log("Failed to update cache on macOS.");
-        }
-    }
-    void gatherSystemInfo() override {
-        log("Gathering system information for macOS...");
-        if (system("system_profiler SPHardwareDataType SPSoftwareDataType SPDiskDataType") != 0) {
-            log("Failed to gather system information on macOS.");
-        }
-        if (system("system_profiler SPFirmwareDataType") != 0) {
-            log("Failed to gather firmware information on macOS.");
-        }
-        if (system("diskutil list") != 0) {
-            log("Failed to gather disk information on macOS.");
-        }
-        if (system("brew list --versions") != 0) {
-            log("Failed to list installed apps via brew on macOS.");
-        }
-    }
+class OSXUpdater:public OSUpdater{
 private:
-    void log(const string& message) {
-        logMessage("macOS", message);
+    void log(const string& message){
+        logMessage("macOS",message);
     }
-};
-class WindowsUpdater : public OSUpdater {
 public:
-    void checkForUpdates() override {
-        log("Checking for updates on Windows...");
-        if (system("powershell -Command Get-WindowsUpdate") != 0) {
-            log("Failed to check for updates on Windows.");
+    void checkForUpdates() override{
+        log("Checking for macOS updates...");
+        runCommand("macOS","softwareupdate -l");
+    }
+    void performUpdate() override{
+        log("Installing macOS updates...");
+        runCommand("macOS","softwareupdate --install --all");
+        log("macOS update process completed.");
+    }
+    void handleDependencies() override{
+        log("Checking application dependencies...");
+        if(commandExists("brew")){
+            runCommand("macOS","brew update");
+            runCommand("macOS","brew upgrade");
+        }
+        else{
+            log("Homebrew not installed, skipping dependency update.");
         }
     }
-    void performUpdate() override {
-        log("Performing Windows update...");
-        if (system("powershell -Command Install-WindowsUpdate -AcceptAll -AutoReboot") != 0) {
-            log("Failed to perform Windows update.");
+    void updateFirmware() override{
+        if(!firmwareMode){
+            log("Firmware updates skipped. Use --firmware to enable.");
+            return;
+        }
+        log("Checking macOS firmware updates...");
+        runCommand("macOS","softwareupdate --list");
+    }
+    void updateCache() override{
+        log("Refreshing macOS update cache...");
+        runCommand("macOS","softwareupdate --list");
+    }
+    void gatherSystemInfo() override{
+        log("Gathering macOS system information...");
+        runCommand("macOS","system_profiler SPHardwareDataType");
+        runCommand("macOS","system_profiler SPSoftwareDataType");
+        runCommand("macOS","system_profiler SPStorageDataType");
+        runCommand("macOS","diskutil list");
+        if(commandExists("brew")){
+            runCommand("macOS","brew list --versions");
+        }
+        else{
+            log("Homebrew unavailable.");
         }
     }
-    void handleDependencies() override {
-        log("Handling Windows dependencies...");
-        if (system("choco upgrade all -y") != 0) {
-            log("Failed to handle dependencies on Windows.");
-        }
-    }
-    void updateFirmware() override {
-        log("Updating firmware on Windows...");
-        if (system("fwupdmgr refresh") != 0) {
-            log("Failed to refresh firmware on Windows.");
-        }
-        if (system("fwupdmgr update") != 0) {
-            log("Failed to update firmware on Windows.");
-        }
-    }
-    void updateCache() override {
-        log("Updating cache on Windows...");
-        if (system("powershell -Command Get-WindowsUpdate -Install") != 0) {
-            log("Failed to update cache on Windows.");
-        }
-    }
-    void gatherSystemInfo() override {
-        log("Gathering system information for Windows...");
-        if (system("systeminfo") != 0) {
-            log("Failed to gather system info on Windows.");
-        }
-        if (system("wmic bios get smbiosbiosversion") != 0) {
-            log("Failed to gather firmware info on Windows.");
-        }
-        if (system("wmic cpu get caption, deviceid, name, numberofcores, maxclockspeed") != 0) {
-            log("Failed to gather CPU info on Windows.");
-        }
-        if (system("wmic diskdrive get model, size") != 0) {
-            log("Failed to gather disk info on Windows.");
-        }
-        if (system("wmic product get name, version") != 0) {
-            log("Failed to gather installed software on Windows.");
-        }
-        if (system("wmic nic get name, speed") != 0) {
-            log("Failed to gather network info on Windows.");
-        }
-    }
-private:
-    void log(const string& message) {
-        logMessage("Windows", message);
-    }
-};
-class LinuxUpdater : public OSUpdater {
+};class LinuxUpdater:public OSUpdater{
 private:
     string distro;
+    void log(const string& message){
+        logMessage("Linux",message);
+    }
+    bool has(const string& command){
+        return commandExists(command);
+    }
+    bool runPackageCommand(const string& command){
+        string finalCommand=command;
+        if(!isRoot()){
+            finalCommand="sudo "+finalCommand;
+        }
+        return runCommand("Linux",finalCommand);
+    }
 public:
-    LinuxUpdater(const string& distroType) : distro(distroType) {}
-    void checkForUpdates() override {
-        log("Checking for updates on " + distro + "...");
-        if (distro == "Ubuntu" || distro == "Debian" || distro == "Mint") {
-            if (!commandExists("apt-get")) {
-                log("apt-get command not found, skipping update.");
+    LinuxUpdater(const string& distroName):distro(distroName){}
+    void checkForUpdates() override{
+        log("Checking updates for "+distro+"...");
+        if((distro.find("Ubuntu")!=string::npos)||(distro.find("Debian")!=string::npos)||(distro.find("Mint")!=string::npos)){
+            if(!has("apt-get")){
+                log("apt-get unavailable.");
                 return;
             }
-            if (system("sudo apt-get update") != 0) {
-                log("Failed to update on " + distro);
-            }
-        } else if (distro == "RedHat" || distro == "CentOS" || distro == "Fedora") {
-            if (!commandExists("dnf")) {
-                log("dnf command not found, skipping update.");
+            runPackageCommand("apt-get update");
+        }
+        else if((distro.find("Fedora")!=string::npos)||(distro.find("Red")!=string::npos)||(distro.find("CentOS")!=string::npos)){
+            if(!has("dnf")){
+                log("dnf unavailable.");
                 return;
             }
-            if (system("sudo dnf check-update") != 0) {
-                log("Failed to check for updates on " + distro);
-            }
-        } else if (distro == "Arch") {
-            if (!commandExists("pacman")) {
-                log("pacman command not found, skipping update.");
+            runPackageCommand("dnf check-update");
+        }
+        else if(distro.find("Arch")!=string::npos){
+            if(!has("pacman")){
+                log("pacman unavailable.");
                 return;
             }
-            if (system("sudo pacman -Sy --noconfirm") != 0) {
-                log("Failed to check for updates on " + distro);
-            }
-        } else {
-            log("Unsupported Linux distribution detected for updates.");
+            runPackageCommand("pacman -Sy");
+        }
+        else{
+            log("Unsupported Linux distribution.");
         }
     }
-    void performUpdate() override {
-        log("Performing update on " + distro + "...");
-        if (distro == "Ubuntu" || distro == "Debian" || distro == "Mint") {
-            if (!commandExists("apt-get")) {
-                log("apt-get command not found, skipping update.");
-                return;
+    void performUpdate() override{
+        log("Performing update for "+distro+"...");
+        if((distro.find("Ubuntu")!=string::npos)||(distro.find("Debian")!=string::npos)||(distro.find("Mint")!=string::npos)){
+            if(has("apt-get")){
+                runPackageCommand("apt-get upgrade -y");
             }
-            if (system("sudo apt-get upgrade -y") != 0) {
-                log("Failed to upgrade on " + distro);
+        }
+        else if((distro.find("Fedora")!=string::npos)||(distro.find("Red")!=string::npos)||(distro.find("CentOS")!=string::npos)){
+            if(has("dnf")){
+                runPackageCommand("dnf upgrade -y");
             }
-        } else if (distro == "RedHat" || distro == "CentOS" || distro == "Fedora") {
-            if (!commandExists("dnf")) {
-                log("dnf command not found, skipping update.");
-                return;
+        }
+        else if(distro.find("Arch")!=string::npos){
+            if(has("pacman")){
+                runPackageCommand("pacman -Syu --noconfirm");
             }
-            if (system("sudo dnf upgrade -y") != 0) {
-                log("Failed to upgrade on " + distro);
-            }
-        } else if (distro == "Arch") {
-            if (!commandExists("pacman")) {
-                log("pacman command not found, skipping update.");
-                return;
-            }
-            if (system("sudo pacman -Syu --noconfirm") != 0) {
-                log("Failed to upgrade on " + distro);
-            }
-        } else {
-            log("Unsupported Linux distribution detected for updates.");
         }
     }
-    void handleDependencies() override {
-        log("Handling dependencies on " + distro + "...");
-        if (distro == "Ubuntu" || distro == "Debian" || distro == "Mint") {
-            if (!commandExists("apt-get")) {
-                log("apt-get command not found, skipping dependency handling.");
-                return;
+    void handleDependencies() override{
+        log("Handling dependencies...");
+        if(distro.find("Ubuntu")!=string::npos||distro.find("Debian")!=string::npos||distro.find("Mint")!=string::npos){
+            if(has("apt-get")){
+                runPackageCommand("apt-get autoremove -y");
+                runPackageCommand("apt-get dist-upgrade -y");
             }
-            if (system("sudo apt-get dist-upgrade -y") != 0) {
-                log("Failed to handle dependencies on " + distro);
+        }
+        else if(distro.find("Fedora")!=string::npos||distro.find("Red")!=string::npos||distro.find("CentOS")!=string::npos){
+            if(has("dnf")){
+                runPackageCommand("dnf distro-sync -y");
             }
-        } else if (distro == "RedHat" || distro == "CentOS" || distro == "Fedora") {
-            if (!commandExists("dnf")) {
-                log("dnf command not found, skipping dependency handling.");
-                return;
+        }
+        else if(distro.find("Arch")!=string::npos){
+            if(has("pacman")){
+                runPackageCommand("pacman -S archlinux-keyring --noconfirm");
             }
-            if (system("sudo dnf distro-sync -y") != 0) {
-                log("Failed to handle dependencies on " + distro);
-            }
-        } else if (distro == "Arch") {
-            if (!commandExists("pacman")) {
-                log("pacman command not found, skipping dependency handling.");
-                return;
-            }
-            if (system("sudo pacman -S archlinux-keyring --noconfirm") != 0) {
-                log("Failed to handle dependencies on " + distro);
-            }
-        } else {
-            log("Unsupported Linux distribution detected for dependency handling.");
         }
     }
-    void updateFirmware() override {
-        log("Updating firmware on " + distro + "...");
-        if (!commandExists("fwupdmgr")) {
-            log("fwupdmgr not found, skipping firmware update.");
+    void updateFirmware() override{
+        if(!firmwareMode){
+            log("Firmware updates disabled. Use --firmware to enable.");
             return;
         }
-        if (system("fwupdmgr refresh") != 0) {
-            log("Failed to refresh firmware on " + distro);
+        log("Checking firmware updates...");
+        if(!has("fwupdmgr")){
+            log("fwupdmgr unavailable.");
+            return;
         }
-        if (system("fwupdmgr update") != 0) {
-            log("Failed to update firmware on " + distro);
+        string command="fwupdmgr refresh && fwupdmgr update";
+        if(!isRoot()){
+            command="sudo "+command;
         }
+        runCommand("Linux",command);
     }
-    void updateCache() override {
-        log("Updating cache on " + distro + "...");
-        if (distro == "Ubuntu" || distro == "Debian" || distro == "Mint") {
-            if (!commandExists("apt-get")) {
-                log("apt-get command not found, skipping cache update.");
-                return;
+    void updateCache() override{
+        log("Refreshing package cache...");
+        if(distro.find("Ubuntu")!=string::npos||distro.find("Debian")!=string::npos||distro.find("Mint")!=string::npos){
+            if(has("apt-get")){
+                runPackageCommand("apt-get update");
             }
-            if (system("sudo apt-get update") != 0) {
-                log("Failed to update cache on " + distro);
+        }
+        else if(distro.find("Fedora")!=string::npos||distro.find("Red")!=string::npos||distro.find("CentOS")!=string::npos){
+            if(has("dnf")){
+                runPackageCommand("dnf makecache");
             }
-        } else if (distro == "RedHat" || distro == "CentOS" || distro == "Fedora") {
-            if (!commandExists("dnf")) {
-                log("dnf command not found, skipping cache update.");
-                return;
-            }
-            if (system("sudo dnf makecache") != 0) {
-                log("Failed to update cache on " + distro);
-            }
-        } else if (distro == "Arch") {
-            if (!commandExists("pacman")) {
-                log("pacman command not found, skipping cache update.");
-                return;
-            }
-            if (system("sudo pacman -Sy --noconfirm") != 0) {
-                log("Failed to update cache on " + distro);
+        }
+        else if(distro.find("Arch")!=string::npos){
+            if(has("pacman")){
+                runPackageCommand("pacman -Sy");
             }
         }
     }
-    void gatherSystemInfo() override {
-        log("Gathering system information for " + distro + "...");
-        if (system("uname -r") != 0) {
-            log("Failed to gather kernel version on " + distro);
+    void gatherSystemInfo() override{
+        log("Gathering Linux system information...");
+        runCommand("Linux","uname -a");
+        runCommand("Linux","lscpu");
+        runCommand("Linux","free -h");
+        runCommand("Linux","lsblk");
+        runCommand("Linux","df -h");
+        runCommand("Linux","cat /etc/os-release");
+        runCommand("Linux","ip addr");
+        runCommand("Linux","lspci");
+        if(has("fwupdmgr")){
+            runCommand("Linux","fwupdmgr get-devices");
         }
-        if (system("lscpu") != 0) {
-            log("Failed to gather CPU info on " + distro);
-        }
-        if (system("free -h") != 0) {
-            log("Failed to gather memory info on " + distro);
-        }
-        if (system("lsblk") != 0) {
-            log("Failed to gather disk details on " + distro);
-        }
-        if (system("df -h") != 0) {
-            log("Failed to gather disk usage on " + distro);
-        }
-        if (system("fwupdmgr get-devices") != 0) {
-            log("Failed to gather firmware info on " + distro);
-        }
-        if (system("dpkg -l") != 0) {
-            log("Failed to list installed packages (Debian-based) on " + distro);
-        }
-        if (system("rpm -qa") != 0) {
-            log("Failed to list installed packages (RedHat-based) on " + distro);
-        }
-        if (system("pacman -Q") != 0) {
-            log("Failed to list installed packages (Arch-based) on " + distro);
-        }
-        if (system("ifconfig -a") != 0) {
-            log("Failed to gather network info on " + distro);
-        }
-        if (system("lspci") != 0) {
-            log("Failed to gather hardware info on " + distro);
-        }
-        if (system("cat /etc/os-release") != 0) {
-            log("Failed to gather OS version on " + distro);
-        }
-    }
-private:
-    void log(const string& message) {
-        logMessage("Linux", message);
     }
 };
-class UpdaterManager {
+class UpdaterManager{
 private:
     unique_ptr<OSUpdater> updater;
-
-    // Small helper: remove quotes from osType if present
-    string stripQuotes(const string& s) {
-        if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
-            return s.substr(1, s.size() - 2);
+    string detectLinuxDistro(){
+        ifstream file("/etc/os-release");
+        string line;
+        while(getline(file,line)){
+            if(line.find("NAME=")==0){
+                return trimQuotes(line.substr(5));
+            }
         }
-        return s;
+        return "Linux";
     }
 public:
-    void detectOS() {
-        string osType;
-
-        // Check for macOS
-        ifstream osFile("/System/Library/CoreServices/SystemVersion.plist");
-        if (osFile) {
-            osType = "macOS";
-        }
-        // Check for Windows
-        else if (system("ver > nul 2>&1") == 0) {
-            osType = "Windows";
-        }
-        // Check for Linux
-        else if (system("uname -s | grep -i 'Linux' > /dev/null 2>&1") == 0) {
-            ifstream file("/etc/os-release");
-            string line;
-            while (getline(file, line)) {
-                if (line.find("NAME=") != string::npos) {
-                    osType = stripQuotes(line.substr(line.find('=') + 1));
-                    break;
-                }
-            }
-        }
-        if (osType == "macOS") {
-            updater = make_unique<OSXUpdater>();
-        } else if (osType == "Windows") {
-            updater = make_unique<WindowsUpdater>();
-        } else if (osType == "Ubuntu" || osType == "Debian" || osType == "Linux Mint" ||
-                   osType == "RedHat" || osType == "CentOS" || osType == "Fedora" || osType == "Arch") {
-            updater = make_unique<LinuxUpdater>(osType);
-        } else {
-            logMessage("Error", "Unsupported OS detected.");
-            return;
-        }
-        logMessage("OS Detected", "OS detected: " + osType);
+    void detectOS(){
+#ifdef _WIN32
+        updater=make_unique<WindowsUpdater>();
+        logMessage("OS","Windows detected.");
+#elif defined(__APPLE__)
+        updater=make_unique<OSXUpdater>();
+        logMessage("OS","macOS detected.");
+#elif defined(__linux__)
+        string distro=detectLinuxDistro();
+        updater=make_unique<LinuxUpdater>(distro);
+        logMessage("OS","Linux detected: "+distro);
+#else
+        throw runtime_error("Unsupported operating system.");
+#endif
     }
-    void performUpdate() {
-        if (updater) {
-            try {
-                updater->updateCache();
-                updater->checkForUpdates();
-                updater->performUpdate();
-                updater->handleDependencies();
-                updater->updateFirmware();
-            } catch (const exception& e) {
-                logMessage("Error", "Error during update: " + string(e.what()));
-            }
-        }
-    }
-    void gatherSystemInfo() {
-        if (updater) {
+    void gatherSystemInfo(){
+        if(updater){
             updater->gatherSystemInfo();
         }
+        else{
+            logMessage("ERROR","No updater available.");
+        }
+    }
+    void performUpdate(){
+        if(!updater){
+            logMessage("ERROR","No updater available.");
+            return;
+        }
+        try{
+            updater->updateCache();
+            updater->checkForUpdates();
+            updater->performUpdate();
+            updater->handleDependencies();
+            updater->updateFirmware();
+        }
+        catch(const exception& e){
+            logMessage("ERROR",string("Update failed: ")+e.what());
+        }
     }
 };
-// ----------------------
-// Main with argv options
-// ----------------------
-int main(int argc, char* argv[]) {
-    UpdaterManager manager;
-    cout << "If you can't work it out, try '--h'." << endl;
-    if (argc > 1) {
-        string arg = argv[1];
-        if (arg == "--help" || arg == "help" || arg  == "--h" || arg == "-h" || arg == "" || arg == " ") {
-            cout << "0(-h|--help|help|--help): show this help menu." << endl;
-            cout << "1(-r|--run|--r): runs the code " << endl;
+void printHelp(){
+    cout<<"Usage:"<<endl;
+    cout<<"  updater [options]"<<endl;
+    cout<<endl;
+    cout<<"Options:"<<endl;
+    cout<<"  -r, --run             Run updater"<<endl;
+    cout<<"  --dry-run             Show commands without executing"<<endl;
+    cout<<"  --firmware            Enable firmware updates"<<endl;
+    cout<<"  --log <file>          Select log file"<<endl;
+    cout<<"  -h, --help            Show help"<<endl;
+}
+int main(int argc,char* argv[]){
+    bool run=false;
+    for(int i=1;i<argc;i++){
+        string arg=argv[i];
+        if(arg=="-r"||arg=="--run"){
+            run=true;
         }
-        else if(arg == "-r" || arg == "--run" && arg == "--r") {
-            manager.detectOS();        // Detect the OS
-            manager.gatherSystemInfo();// Gather detailed system info
-            manager.performUpdate();   // Run update sequence
+        else if(arg=="--dry-run"){
+            dryRun=true;
         }
+        else if(arg=="--firmware"){
+            firmwareMode=true;
+        }
+        else if(arg=="--log"&&i+1<argc){
+            logFilename=argv[++i];
+        }
+        else if(arg=="-h"||arg=="--help"){
+            printHelp();
+            return 0;
+        }
+        else{
+            cout<<"Unknown option: "<<arg<<endl;
+            printHelp();
+            return 1;
+        }
+    }
+    if(!run){
+        printHelp();
+        return 0;
+    }
+    try{
+        logMessage("INFO","===== UPDATE PROCESS STARTED =====");
+        if(dryRun){
+            logMessage("INFO","Dry-run mode enabled.");
+        }
+        if(firmwareMode){
+            logMessage("INFO","Firmware updates enabled.");
+        }
+        UpdaterManager manager;
+        manager.detectOS();
+        manager.gatherSystemInfo();
+        manager.performUpdate();
+        logMessage("INFO","===== UPDATE PROCESS COMPLETED =====");
+        cout<<"Update process completed. Log: "<<logFilename<<endl;
+    }
+    catch(const exception& e){
+        logMessage("FATAL",e.what());
+        cerr<<"Fatal error: "<<e.what()<<endl;
+        return 1;
     }
     return 0;
-};
+}
