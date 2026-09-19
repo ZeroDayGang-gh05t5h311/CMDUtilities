@@ -1,0 +1,554 @@
+#!/usr/bin/python3
+from __future__ import annotations
+import concurrent.futures
+from pathlib import Path
+from threading import Lock
+from typing import List, Dict, Any, Tuple
+import bisect,string,csv,json,argparse,socket,ssl,threading,queue
+import random,sys,os,subprocess,ast,operator,platform,re,io,time,shlex
+import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+IS_WINDOWS=platform.system()=="Windows"
+IS_POSIX=os.name=="posix"
+COMMAND_TIMEOUT=30
+DOWNLOAD_TIMEOUT=10
+MAX_FILE_SIZE=10*1024*1024
+def clear_screen():
+    try:
+        os.system("cls" if IS_WINDOWS else "clear")
+    except Exception:
+        pass
+def safe_split(cmd):
+    if isinstance(cmd,list):
+        return cmd
+    try:
+        return shlex.split(cmd,posix=not IS_WINDOWS)
+    except Exception:
+        return []
+def safe_session():
+    try:
+        session=requests.Session()
+        retry=Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[429,500,502,503,504],
+            allowed_methods=["GET"]
+        )
+        adapter=HTTPAdapter(max_retries=retry)
+        session.mount("http://",adapter)
+        session.mount("https://",adapter)
+        return session
+    except Exception:
+        return requests.Session()
+try:
+    from sila import *
+except ModuleNotFoundError:
+    print("sila module not found. Attempting to download...")
+    sila_url="https://raw.githubusercontent.com/ZeroDayGang-gh05t5h311/MagicTheInformationGathering/refs/heads/main/SILA(Py)"
+    silafilename="sila.py"
+    try:
+        session=safe_session()
+        res_sila=session.get(
+            sila_url,
+            timeout=DOWNLOAD_TIMEOUT
+        )
+        res_sila.raise_for_status()
+        if len(res_sila.content)<=MAX_FILE_SIZE:
+            with open(silafilename,"wb") as file:
+                file.write(res_sila.content)
+            print(f"Downloaded successfully as {silafilename}.")
+            from sila import *
+        else:
+            print("SILA download blocked: file too large.")
+    except requests.RequestException as e:
+        print(f"SILA download failed: {e}")
+    except OSError as e:
+        print(f"SILA file error: {e}")
+    except Exception as e:
+        print(f"SILA initialization failed: {e}")
+class SafeCalc:
+    OPS={
+        ast.Add:operator.add,
+        ast.Sub:operator.sub,
+        ast.Mult:operator.mul,
+        ast.Div:operator.truediv,
+        ast.Mod:operator.mod,
+        ast.Pow:operator.pow,
+        ast.FloorDiv:operator.floordiv,
+        ast.USub:operator.neg,
+        ast.UAdd:operator.pos,
+    }
+    @staticmethod
+    def eval_expr(expr):
+        if not isinstance(expr,str):
+            raise TypeError("Expression must be text")
+        node=ast.parse(expr,mode="eval").body
+        return SafeCalc._eval(node)
+    @staticmethod
+    def _eval(node):
+        if isinstance(node,ast.BinOp):
+            operation=SafeCalc.OPS.get(type(node.op))
+            if operation is None:
+                raise ValueError("Unsupported operator")
+            return operation(
+                SafeCalc._eval(node.left),
+                SafeCalc._eval(node.right)
+            )
+        elif isinstance(node,ast.UnaryOp):
+            operation=SafeCalc.OPS.get(type(node.op))
+            if operation is None:
+                raise ValueError("Unsupported operator")
+            return operation(
+                SafeCalc._eval(node.operand)
+            )
+        elif isinstance(node,ast.Constant):
+            if isinstance(node.value,(int,float)):
+                return node.value
+            raise ValueError("Only numbers allowed")
+        else:
+            raise TypeError(
+                f"Unsupported expression: {ast.dump(node)}"
+            )
+class tool:
+    @staticmethod
+    def getInput(ios,arg):
+        try:
+            val=input(arg)
+            return int(val) if ios else val
+        except ValueError:
+            print("Invalid input.")
+            return 0 if ios else ""
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 0 if ios else ""
+        except Exception as e:
+            print(f"Input error: {e}")
+            return 0 if ios else ""
+    @staticmethod
+    def cmd(args,capture=False):
+        try:
+            args=safe_split(args)
+            if not args:
+                return None
+            result=subprocess.run(
+                args,
+                capture_output=capture,
+                text=True,
+                shell=False,
+                timeout=COMMAND_TIMEOUT
+            )
+            if capture:
+                return result.stdout
+            return None
+        except subprocess.TimeoutExpired:
+            print("[ERROR] Command timed out.")
+        except FileNotFoundError:
+            print("[ERROR] Command not found.")
+        except subprocess.SubprocessError as e:
+            print(f"[ERROR] Command failed: {e}")
+        except Exception as e:
+            print(f"[ERROR] Unexpected command error: {e}")
+        return None
+    @staticmethod
+    def mdir():
+        try:
+            dname=tool.getInput(False,"Directory name please: ")
+            if not dname:
+                return
+            Path(dname).mkdir(parents=True,exist_ok=True)
+            print(f"OK, created: '{dname}'\nPATH: {os.getcwd()}")
+        except PermissionError:
+            print("Permission denied.")
+        except OSError as e:
+            print(f"Directory creation error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+    @staticmethod
+    def read(fname):
+        try:
+            if not fname:
+                return
+            with open(fname,"r",encoding="utf-8",errors="ignore") as f:
+                print(f.read())
+        except FileNotFoundError:
+            print("File not found!")
+        except PermissionError:
+            print("Permission denied.")
+        except OSError as e:
+            print(f"File error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+    @staticmethod
+    def write(fname):
+        try:
+            if not fname:
+                return
+            data=tool.getInput(False,"> ")
+            with open(fname,"a+",encoding="utf-8") as f:
+                f.write(data)
+        except PermissionError:
+            print("Permission denied.")
+        except OSError as e:
+            print(f"Write error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+    @staticmethod
+    def appendFile():
+        try:
+            fname=tool.getInput(False,"Filename: ")
+            data=tool.getInput(False,"Append: ")
+            if not fname:
+                return
+            with open(fname,"a",encoding="utf-8") as f:
+                f.write("\n"+data)
+        except PermissionError:
+            print("Permission denied.")
+        except OSError as e:
+            print(f"Append error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+    @staticmethod
+    def sfile(filename,search):
+        try:
+            if not filename or not search:
+                return
+            with open(filename,"r",encoding="utf-8",errors="ignore") as f:
+                matches=[line for line in f if search.lower() in line.lower()]
+            print("".join(matches) if matches else "No matches found.")
+        except FileNotFoundError:
+            print("File not found.")
+        except PermissionError:
+            print("Permission denied.")
+        except Exception as e:
+            print(f"Search error: {e}")
+    @staticmethod
+    def mkpasswd():
+        try:
+            chars=string.ascii_letters+string.digits+"!^*£$"
+            passwd=random.choice(string.ascii_letters)
+            passwd+="".join(random.choice(chars) for _ in range(7))
+            print(f"Password: {passwd}")
+        except Exception as e:
+            print(f"Password generation error: {e}")
+    @staticmethod
+    def guess():
+        print("Ok... guessing game, 5 difficulty levels")
+        rdm_diff_select=[[0,2],[0,4],[0,5],[0,6],[0,9]]
+        tmp=2
+        try:
+            tmp=tool.getInput(True,"Please select difficulty 1-5 (default 2): ")
+            if tmp<1 or tmp>5:
+                tmp=2
+        except Exception:
+            tmp=2
+        try:
+            player_int=random.randint(*rdm_diff_select[tmp-1])
+            cpu_int=random.randint(*rdm_diff_select[tmp-1])
+            print(f"Your number is: {player_int}.\nComputer's is: {cpu_int}.")
+        except Exception as e:
+            print(f"Game error: {e}")
+    @staticmethod
+    def calc():
+        try:
+            expr=tool.getInput(False,"Expression: ")
+            print(SafeCalc.eval_expr(expr))
+        except Exception as e:
+            print(e)
+    @staticmethod
+    def local():
+        try:
+            fname="local_system_information.txt"
+            with open(fname,"w",encoding="utf-8") as f:
+                f.write(f"System: {platform.system()}\n")
+                f.write(f"Node: {platform.node()}\n")
+                f.write(f"Release: {platform.release()}\n")
+                f.write(f"Processor: {platform.processor()}\n")
+            print(f"Saved to {fname}")
+        except PermissionError:
+            print("Permission denied.")
+        except Exception as e:
+            print(f"System info error: {e}")
+    @staticmethod
+    def ohd():
+        try:
+            if IS_WINDOWS:
+                print("ASCII table not natively supported on Windows.")
+            else:
+                tool.cmd(["man","ascii"])
+        except Exception as e:
+            print(f"ASCII error: {e}")
+    @staticmethod
+    def cls():
+        clear_screen()
+    @staticmethod
+    def wdh():
+        try:
+            domain=tool.getInput(False,"Domain: ")
+            save=tool.getInput(False,"Save? (y/n): ").lower()
+            if not domain:
+                return
+            def run(cmd):
+                return tool.cmd(cmd,capture=True) or "Unavailable\n"
+            results=""
+            for cmd in (["whois",domain],["nslookup",domain]):
+                try:
+                    results+=run(cmd)
+                except Exception:
+                    results+="Command not available\n"
+            if save in ("y","yes"):
+                fname=tool.getInput(False,"Filename: ")
+                if fname:
+                    with open(fname,"w",encoding="utf-8") as f:
+                        f.write(results)
+                    print(f"Saved to {fname}")
+            else:
+                print(results)
+        except Exception as e:
+            print(f"Lookup error: {e}")
+    @staticmethod
+    def pchk():
+        try:
+            port=tool.getInput(True,"Port: ")
+            if port<1 or port>65535:
+                print("Invalid port.")
+                return
+            if IS_WINDOWS:
+                cmd=["netstat","-ano"]
+            else:
+                cmd=["netstat","-tuln"]
+            output=tool.cmd(cmd,capture=True)
+            if output:
+                found=False
+                for line in output.splitlines():
+                    if f":{port}" in line:
+                        print(line)
+                        found=True
+                if not found:
+                    print("No matching ports found.")
+        except ValueError:
+            print("Invalid port value.")
+        except Exception as e:
+            print(f"Port check error: {e}")
+    @staticmethod
+    def lsys():
+        try:
+            output_file="system_report.txt"
+            def run(cmd):
+                try:
+                    return tool.cmd(cmd,capture=True) or ""
+                except Exception:
+                    return ""
+            with open(output_file,"w",encoding="utf-8") as f:
+                f.write("=== SYSTEM REPORT ===\n")
+                ping=["ping","-n","4","google.com"] if IS_WINDOWS else ["ping","-c","4","google.com"]
+                f.write(run(ping))
+                cpu=["wmic","cpu","get","name"] if IS_WINDOWS else ["uname","-p"]
+                f.write(run(cpu))
+                mem=["systeminfo"] if IS_WINDOWS else ["free","-h"]
+                f.write(run(mem))
+                f.write(run(["whoami"]))
+                f.write("\nPlatform:\n")
+                f.write(platform.platform()+"\n")
+            print(f"Saved to {output_file}")
+        except PermissionError:
+            print("Permission denied.")
+        except Exception as e:
+            print(f"System report error: {e}")
+    @staticmethod
+    def dirmap():
+        try:
+            output_file="directory_map.txt"
+            if IS_WINDOWS:
+                roots=[f"{d}:/" for d in string.ascii_uppercase if os.path.exists(f"{d}:/")]
+            else:
+                roots=["/"]
+            print(f"[*] Mapping directories from {roots} ...")
+            with open(output_file,"w",encoding="utf-8") as f:
+                for root in roots:
+                    try:
+                        base_path=Path(root).resolve()
+                        f.write(f"{base_path}/\n")
+                        base_path_len=len(base_path.parts)
+                        for current_path,dirs,files in os.walk(base_path,topdown=True,followlinks=False):
+                            try:
+                                current_path=Path(current_path)
+                                rel_parts=current_path.parts[base_path_len:]
+                                level=len(rel_parts)
+                                indent="│   "*(level-1)+("├── " if level>0 else "")
+                                dir_name=current_path.name if level>0 else str(current_path)
+                                f.write(f"{indent}{dir_name}/\n")
+                                subindent="│   "*level+"├── "
+                                for name in files:
+                                    f.write(f"{subindent}{name}\n")
+                            except PermissionError:
+                                continue
+                            except OSError:
+                                continue
+                    except Exception as e:
+                        sys.stderr.write(f"Error accessing {root}: {e}\n")
+            print(f"[+] Directory map saved to {output_file}")
+        except PermissionError:
+            print("Permission denied.")
+        except Exception as e:
+            print(f"Directory mapping error: {e}")
+    @staticmethod
+    def strcalc():
+        try:
+            Spotify_High=0.005
+            Spotify_Low=0.003
+            Soundcloud_Low=0.0025
+            Soundcloud_High=0.004
+            AmazonMusic_Low=0.004
+            AmazonMusic_High=0.005
+            YouTube_Low=0.0003
+            YouTube_High=0.003
+            AppleMusic_Low=0.006
+            AppleMusic_High=0.01
+            tmp=tool.getInput(False,"Random or input mode?(-i|-r)")
+            if tmp in ("-i","--i","i","input"):
+                tmp_seed=tool.getInput(True,"How many streams?(it will do the math and output for multiple services)\n$: ")
+            else:
+                tmp_seed=1000000
+            if tmp_seed<0:
+                print("Invalid stream count.")
+                return
+            spotify_high=str(Spotify_High*tmp_seed)
+            spotify_low=str(Spotify_Low*tmp_seed)
+            soundcloud_low=str(Soundcloud_Low*tmp_seed)
+            soundcloud_high=str(Soundcloud_High*tmp_seed)
+            amazonmusic_low=str(AmazonMusic_Low*tmp_seed)
+            amazonmusic_high=str(AmazonMusic_High*tmp_seed)
+            youtube_low=str(YouTube_Low*tmp_seed)
+            youtube_high=str(YouTube_High*tmp_seed)
+            apple_music_low=str(AppleMusic_Low*tmp_seed)
+            apple_music_high=str(AppleMusic_High*tmp_seed)
+            print("All are guesses based on publicly available data: ")
+            print("Spotify high-end pay: $"+spotify_high)
+            print("Spotify low-end pay: $"+spotify_low)
+            print("Soundcloud high-end pay: $"+soundcloud_high)
+            print("Soundcloud low-end pay: $"+soundcloud_low)
+            print("Amazon music high-end pay: $"+amazonmusic_high)
+            print("Amazon music low-end pay: $"+amazonmusic_low)
+            print("YouTube high-end pay: $"+youtube_high)
+            print("YouTube low-end pay: $"+youtube_low)
+            print("Apple music high-end pay: $"+apple_music_high)
+            print("Apple music low-end pay: $"+apple_music_low)
+        except Exception as e:
+            print(f"Streaming calculator error: {e}")
+cmds=[
+"help: this help list",
+"mdir: make directory",
+"read/write/append: file operations",
+"sfile: search file",
+"mkpasswd: generate password",
+"guess: guessing game",
+"calc: calculator",
+"local: basic system info",
+"osi: OSI model",
+"ohd: ascii table (Linux only)",
+"wdh: domain lookup (uses nslookup fallback)",
+"pchk: check open ports",
+"lsys: system report (cross-platform)",
+"dirmap: map filesystem",
+"sila: banner grab (requires network tools native to linux)",
+"strcalc: streaming payout estimate",
+"cls: clear screen",
+"cmd: run system command",
+"exit: exit program"
+]
+def icmd():
+    try:
+        cmd=tool.getInput(False,"> ").strip()
+        if not cmd:
+            return
+        if cmd=="exit":
+            return "exit"
+        elif cmd=="help":
+            for c in cmds:
+                print(c)
+        elif cmd=="mdir":
+            tool.mdir()
+        elif cmd=="read":
+            tool.read(tool.getInput(False,"File: "))
+        elif cmd=="write":
+            tool.write(tool.getInput(False,"File: "))
+        elif cmd=="append":
+            tool.appendFile()
+        elif cmd=="sfile":
+            tool.sfile(
+                tool.getInput(False,"File: "),
+                tool.getInput(False,"Search: ")
+            )
+        elif cmd=="mkpasswd":
+            tool.mkpasswd()
+        elif cmd=="guess":
+            tool.guess()
+        elif cmd=="calc":
+            tool.calc()
+        elif cmd=="local":
+            tool.local()
+        elif cmd=="osi":
+            try:
+                tool.osi()
+            except AttributeError:
+                print("OSI module/function unavailable.")
+        elif cmd=="ohd":
+            tool.ohd()
+        elif cmd=="wdh":
+            tool.wdh()
+        elif cmd=="pchk":
+            tool.pchk()
+        elif cmd=="lsys":
+            tool.lsys()
+        elif cmd=="dirmap":
+            tool.dirmap()
+        elif cmd=="sila":
+            try:
+                target=tool.getInput(False,"Target: ")
+                out=tool.getInput(False,"Output file: ")
+                if not target or not out:
+                    return
+                tool.cmd(
+                    [
+                        "python",
+                        "sila.py",
+                        target,
+                        "--json",
+                        out
+                    ]
+                )
+            except Exception as e:
+                print(f"SILA error: {e}")
+        elif cmd=="strcalc":
+            tool.strcalc()
+        elif cmd=="cls":
+            tool.cls()
+        elif cmd=="cmd":
+            command=tool.getInput(False,"CMD: ")
+            if command:
+                tool.cmd(command)
+        else:
+            print("Unknown command. Type 'help' for options.")
+    except KeyboardInterrupt:
+        print("\nCommand cancelled.")
+    except Exception as e:
+        print(f"Command error: {e}")
+try:
+    while True:
+        if icmd()=="exit":
+            break
+except KeyboardInterrupt:
+    print("\nBye.")
+except Exception as e:
+    print(f"Fatal error: {e}")
+finally:
+    try:
+        import shutil
+        shutil.rmtree(
+            "__pycache__",
+            ignore_errors=True
+        )
+    except Exception:
+        pass
