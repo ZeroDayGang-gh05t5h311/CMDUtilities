@@ -4,12 +4,11 @@ from logging.handlers import RotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from threading import Lock
-from collections import defaultdict, deque
+from collections import defaultdict,deque
 RATE_LIMIT_SECONDS = 60
 MAX_WORKERS = max(2, multiprocessing.cpu_count() * 2)
 BASELINE_FILE = "baseline.json"
 MAX_BASELINE_ENTRIES = 10000
-# Heuristic tuning
 FREQ_WINDOW = 60
 FREQ_THRESHOLD = 20
 BEACON_MIN_SAMPLES = 5
@@ -78,7 +77,6 @@ class NetworkMonitor:
                 data = json.load(f)
                 self.baseline["connections"] = set(data.get("connections", []))
                 self.baseline["process_ports"] = set(data.get("process_ports", []))
-
     def save_baseline(self):
         with open(BASELINE_FILE, "w", encoding="utf-8") as f:
             json.dump(
@@ -89,7 +87,6 @@ class NetworkMonitor:
                 f,
                 indent=2
             )
-
     def rate_limited(self, key):
         now = time.time()
         with self.lock:
@@ -98,11 +95,9 @@ class NetworkMonitor:
                 return True
             self.alert_cache[key] = now
         return False
-
     @staticmethod
     def clean_ip(ip):
         return ip.split("%", 1)[0].strip("[]")
-
     def classify_ip(self, ip):
         try:
             addr = ipaddress.ip_address(ip)
@@ -117,7 +112,6 @@ class NetworkMonitor:
             return "public"
         except Exception:
             return "unknown"
-
     def get_context(self, ip):
         ip_class = self.classify_ip(ip)
         if ip_class == "loopback":
@@ -314,7 +308,7 @@ class NetworkMonitor:
         print("=====================================\n")
 def main():
     p = argparse.ArgumentParser(
-        description="Network connection and process monitor with baseline learning"
+        description=""
     )
     p.add_argument("-c", "--continuous", action="store_true")
     p.add_argument("--terminal", action="store_true")
