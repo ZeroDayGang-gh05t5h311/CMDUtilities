@@ -1,0 +1,335 @@
+import socket
+import subprocess
+import platform
+import ipaddress
+import urllib.request
+import json
+import re
+import os
+import time
+from datetime import datetime
+# ==========================================
+# NETWORK ASSESSMENT & SECURITY AUDITOR
+# ==========================================
+REPORT = {}
+def run_command(command):
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "Unknown"
+def get_public_ip():
+    try:
+        return urllib.request.urlopen(
+            "https://api.ipify.org",
+            timeout=5
+        ).read().decode()
+    except Exception:
+        return "Unavailable"
+def get_hostname():
+    return socket.gethostname()
+def get_gateway():
+    system = platform.system()
+    if system == "Windows":
+        output = run_command(["ipconfig"])
+        for line in output.splitlines():
+            if "Default Gateway" in line:
+                gateway = line.split(":")[-1].strip()
+                if gateway:
+                    return gateway
+    elif system == "Linux":
+        output = run_command(["ip", "route", "show", "default"])
+        parts = output.split()
+        if "via" in parts:
+            return parts[parts.index("via") + 1]
+    elif system == "Darwin":
+        output = run_command(
+            ["route", "-n", "get", "default"]
+        )
+        for line in output.splitlines():
+            if "gateway:" in line:
+                return line.split("gateway:")[1].strip()
+    return "Unknown"
+def get_subnet():
+    system = platform.system()
+    local_ip = get_local_ip()
+    try:
+        if system == "Windows":
+            output = run_command(["ipconfig", "/all"])
+            lines = output.splitlines()
+
+            for i, line in enumerate(lines):
+                if "IPv4 Address" in line:
+                    for following in lines[i+1:i+5]:
+                        if "Subnet Mask" in following:
+                            mask = following.split(":")[-1].strip()
+                            return str(ipaddress.ip_network(
+                                f"{local_ip}/{mask}",
+                                strict=False
+                            ))
+
+        elif system == "Linux":
+            output = run_command(
+                ["ip", "-o", "-f", "inet", "addr", "show"]
+            )
+            for line in output.splitlines():
+                match = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+/\d+)", line)
+                if match and match.group(1).startswith(local_ip + "/"):
+                    return str(ipaddress.ip_interface(
+                        match.group(1)
+                    ).network)
+        elif system == "Darwin":
+            output = run_command(["ifconfig"])
+            for line in output.splitlines():
+                match = re.search(
+                    r"inet\s+(\d+\.\d+\.\d+\.\d+).*netmask\s+(0x[0-9a-fA-F]+)",
+                    line
+                )
+                if match and match.group(1) == local_ip:
+                    mask = ipaddress.IPv4Address(
+                        int(match.group(2), 16)
+                    )
+                    return str(ipaddress.ip_network(
+                        f"{local_ip}/{mask}",
+                        strict=False
+                    ))
+    except Exception:
+        pass
+    return "Unknown"
+def get_interfaces():
+    system = platform.system()
+    if system == "Windows":
+        return run_command(["ipconfig", "/all"])
+    elif system == "Linux":
+        return run_command(["ip", "addr"])
+    elif system == "Darwin":
+        return run_command(["ifconfig"])
+    return "Unavailable"
+# ==========================================
+# VPN DETECTION
+# ==========================================
+def assess_vpn():
+    system = platform.system()
+    interface_info = get_interfaces()
+    vpn_keywords = [
+        "tun", "tap", "wg", "wireguard",
+        "openvpn", "tailscale", "zerotier",
+        "proton", "nord", "expressvpn",
+        "mullvad", "vpn", "utun"
+    ]
+    matches = [
+        keyword for keyword in vpn_keywords
+        if keyword.lower() in interface_info.lower()
+    ]
+    if system == "Windows":
+        routes = run_command(["route", "print"])
+    elif system == "Linux":
+        routes = run_command(["ip", "route"])
+    else:
+        routes = run_command(["netstat", "-rn"])
+    route_matches = [
+        keyword for keyword in vpn_keywords
+        if keyword.lower() in routes.lower()
+    ]
+    return {
+        "Possible VPN Indicators": list(set(matches)),
+        "VPN Route Indicators": list(set(route_matches)),
+        "Assessment": (
+            "Possible VPN interface detected"
+            if matches or route_matches
+            else "No obvious VPN indicators detected"
+        ),
+        "Note": "This is a heuristic, not definitive VPN verification."
+    }
+# ==========================================
+# NETWORK CONNECTIVITY
+# ==========================================
+def ping_test(target):
+    system = platform.system()
+    command = (
+        ["ping", "-n", "1", "-w", "2000", target]
+        if system == "Windows"
+        else ["ping", "-c", "1", "-W", "2", target]
+    )
+    start = time.time()
+    result = run_command(command)
+    elapsed = round((time.time() - start) * 1000, 2)
+    success = (
+        "TTL=" in result
+        if system == "Windows"
+        else "bytes from" in result
+    )
+    return {
+        "Target": target,
+        "Reachable": success,
+        "Response Time (ms)": elapsed if success else None
+    }
+def dns_test():
+    servers = ["google.com", "cloudflare.com"]
+    results = {}
+    for domain in servers:
+        try:
+            ip = socket.gethostbyname(domain)
+            results[domain] = ip
+        except Exception:
+            results[domain] = "Resolution Failed"
+    return results
+def internet_test():
+    try:
+        urllib.request.urlopen(
+            "https://www.google.com",
+            timeout=5
+        )
+        return "Internet connection successful"
+    except Exception:
+        return "Internet connection unavailable"
+# ==========================================
+# LOCAL DEVICE DISCOVERY
+# ==========================================
+def discover_devices():
+    system = platform.system()
+    if system == "Windows":
+        output = run_command(["arp", "-a"])
+    else:
+        output = run_command(["arp", "-a"])
+    devices = []
+    for line in output.splitlines():
+        match = re.search(
+            r"(\d+\.\d+\.\d+\.\d+)\s+"
+            r"(([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2})",
+            line
+        )
+        if match:
+            devices.append({
+                "IP": match.group(1),
+                "MAC": match.group(2)
+            })
+    return devices
+# ==========================================
+# LOCAL PORT AUDIT
+# ==========================================
+def audit_local_ports():
+    # Checks common TCP ports on this computer only.
+    ports = {
+        21: "FTP",
+        22: "SSH",
+        23: "Telnet",
+        25: "SMTP",
+        53: "DNS",
+        80: "HTTP",
+        110: "POP3",
+        135: "Windows RPC",
+        139: "NetBIOS",
+        143: "IMAP",
+        443: "HTTPS",
+        445: "SMB",
+        3306: "MySQL",
+        3389: "Remote Desktop",
+        5432: "PostgreSQL",
+        5900: "VNC",
+        8080: "HTTP Alternate"
+    }
+    results = []
+    for port, service in ports.items():
+        try:
+            s = socket.socket(
+                socket.AF_INET,
+                socket.SOCK_STREAM
+            )
+            s.settimeout(0.3)
+            status = s.connect_ex(("127.0.0.1", port))
+            s.close()
+            if status == 0:
+                results.append({
+                    "Port": port,
+                    "Service": service,
+                    "Status": "OPEN"
+                })
+        except Exception:
+            pass
+    return results
+# ==========================================
+# NETWORK REPORT
+# ==========================================
+def assess_network():
+    print("\n" + "=" * 55)
+    print("       NETWORK ASSESSMENT & SECURITY AUDIT")
+    print("=" * 55)
+    REPORT["Assessment Date"] = datetime.now().isoformat()
+    REPORT["Hostname"] = get_hostname()
+    REPORT["Operating System"] = platform.platform()
+    REPORT["Local IP"] = get_local_ip()
+    REPORT["Public IP"] = get_public_ip()
+    REPORT["Default Gateway"] = get_gateway()
+    REPORT["Subnet"] = get_subnet()
+    print("\n[1] BASIC NETWORK INFORMATION")
+    for key, value in REPORT.items():
+        print(f"{key}: {value}")
+    print("\n[2] NETWORK INTERFACES")
+    REPORT["Network Interfaces"] = get_interfaces()
+    print(REPORT["Network Interfaces"])
+    print("\n[3] VPN ASSESSMENT")
+    REPORT["VPN Information"] = assess_vpn()
+    for key, value in REPORT["VPN Information"].items():
+        print(f"{key}: {value}")
+    print("\n[4] CONNECTIVITY TESTS")
+    REPORT["Gateway Connectivity"] = ping_test(
+        REPORT["Default Gateway"]
+    ) if REPORT["Default Gateway"] != "Unknown" else "Unknown"
+    REPORT["DNS Results"] = dns_test()
+    REPORT["Internet Connectivity"] = internet_test()
+    print("Gateway:", REPORT["Gateway Connectivity"])
+    print("DNS:", REPORT["DNS Results"])
+    print("Internet:", REPORT["Internet Connectivity"])
+    print("\n[5] LOCAL NETWORK DEVICES")
+    REPORT["Discovered Devices"] = discover_devices()
+    if REPORT["Discovered Devices"]:
+        for device in REPORT["Discovered Devices"]:
+            print(device)
+    else:
+        print("No devices found in the current ARP cache.")
+    print("\n[6] LATENCY TESTS")
+    REPORT["Latency Tests"] = {
+        "Google DNS": ping_test("8.8.8.8"),
+        "Cloudflare DNS": ping_test("1.1.1.1")
+    }
+    for name, result in REPORT["Latency Tests"].items():
+        print(name, result)
+    print("\n[7] LOCAL OPEN PORT AUDIT")
+    REPORT["Local Open Ports"] = audit_local_ports()
+    if REPORT["Local Open Ports"]:
+        for port in REPORT["Local Open Ports"]:
+            print(port)
+    else:
+        print("No tested TCP ports are open on localhost.")
+    print("\n[8] GENERATING REPORTS")
+    # Save JSON report
+    with open("network_report.json", "w") as file:
+        json.dump(REPORT, file, indent=4)
+    # Save readable text report
+    with open("network_report.txt", "w") as file:
+        for key, value in REPORT.items():
+            file.write(f"\n{key}\n")
+            file.write("-" * 40 + "\n")
+            file.write(str(value) + "\n")
+    print("JSON report: network_report.json")
+    print("Text report: network_report.txt")
+    print("\n" + "=" * 55)
+    print("          NETWORK ASSESSMENT COMPLETE")
+    print("=" * 55)
+if __name__ == "__main__":
+    assess_network()
